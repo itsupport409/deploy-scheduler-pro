@@ -1,0 +1,14 @@
+runtime: nodejs20
+instance_class: F1
+
+handlers:
+  # Static assets (JS)
+  - url: /(.*\.js)
+    static_files: dist/\1
+    upload: dist/.*\.js
+
+  # Route everything else to index.html (React Router support)
+  - url: /.*
+    static_files: dist/index.html
+    upload: dist/index.html
+    secure: always
