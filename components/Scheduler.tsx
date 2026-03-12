@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shift, User, Location, Role, ScheduleTemplate, TemplateShift, ChangeRequest, RequestStatus, RequestType } from '../types';
 import { Calendar as CalendarIcon, MapPin, Plus, Lock, Printer, Share2, Clock, X, Trash2, Check, LayoutGrid, Save, ChevronDown, Sun, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -14,6 +14,7 @@ interface SchedulerProps {
   onSaveTemplate: (template: Partial<ScheduleTemplate>) => void;
   onApplyTemplate: (locationId: string, weekStart: Date, template: ScheduleTemplate) => void;
   onRemoveTemplate: (id: string) => void;
+  onAddLocation: (name: string, calendarId: string) => string;
   currentUser: User;
 }
 
@@ -29,10 +30,22 @@ const Scheduler: React.FC<SchedulerProps> = ({
   onSaveTemplate,
   onApplyTemplate,
   onRemoveTemplate,
+  onAddLocation,
   currentUser 
 }) => {
-  const [selectedLocation, setSelectedLocation] = useState<string>(locations[0].id);
+  const [selectedLocation, setSelectedLocation] = useState<string>(locations[0]?.id || '');
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const [showAddLocationModal, setShowAddLocationModal] = useState(false);
+  const [newLocName, setNewLocName] = useState('');
+  const [newLocCalendarId, setNewLocCalendarId] = useState('');
+  const [addLocError, setAddLocError] = useState<string | null>(null);
+
+  // Keep selectedLocation valid when locations change (e.g. load from API)
+  useEffect(() => {
+    const currentExists = locations.some(l => l.id === selectedLocation);
+    if (!currentExists && locations.length > 0) setSelectedLocation(locations[0].id);
+    if (locations.length > 0 && !selectedLocation) setSelectedLocation(locations[0].id);
+  }, [locations, selectedLocation]);
   
   // Week navigation state
   const [weekStart, setWeekStart] = useState(() => {
@@ -336,12 +349,54 @@ const Scheduler: React.FC<SchedulerProps> = ({
         </div>
         
         <div className="flex items-center gap-3">
-            <div className="flex items-center bg-white border border-slate-300 rounded-lg px-3 py-2 shadow-sm">
-                <MapPin size={16} className="text-slate-400 mr-2" />
-                <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)} className="bg-transparent outline-none text-sm font-medium text-slate-700">
-                    {locations.map(loc => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
-                </select>
+            <div className="flex items-center bg-white border border-slate-300 rounded-lg shadow-sm">
+                <div className="flex items-center px-3 py-2 border-r border-slate-200">
+                    <MapPin size={16} className="text-slate-400 mr-2" />
+                    <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)} className="bg-transparent outline-none text-sm font-medium text-slate-700 min-w-[180px]">
+                        {locations.map(loc => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
+                    </select>
+                </div>
+                <button type="button" onClick={() => { setShowAddLocationModal(true); setAddLocError(null); setNewLocName(''); setNewLocCalendarId(''); }} className="p-2 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded-r-lg transition-colors" title="Add location">
+                    <Plus size={18} />
+                </button>
             </div>
+
+            {showAddLocationModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddLocationModal(false)}>
+                    <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><MapPin size={20} className="text-indigo-500" /> Add location</h3>
+                            <button type="button" onClick={() => setShowAddLocationModal(false)} className="text-slate-400 hover:text-slate-600 p-1"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            setAddLocError(null);
+                            const name = newLocName.trim();
+                            const calendarId = newLocCalendarId.trim();
+                            if (!name) { setAddLocError('Enter a location name.'); return; }
+                            const newId = onAddLocation(name, calendarId || name.replace(/\s+/g, '_').toLowerCase() + '@group.calendar.google.com');
+                            setSelectedLocation(newId);
+                            setShowAddLocationModal(false);
+                            setNewLocName('');
+                            setNewLocCalendarId('');
+                        }} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Location name</label>
+                                <input type="text" value={newLocName} onChange={e => setNewLocName(e.target.value)} placeholder="e.g. North Branch" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" autoFocus />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Calendar ID (optional)</label>
+                                <input type="text" value={newLocCalendarId} onChange={e => setNewLocCalendarId(e.target.value)} placeholder="e.g. mycal@group.calendar.google.com" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            {addLocError && <p className="text-xs text-red-600 font-medium">{addLocError}</p>}
+                            <div className="flex gap-2 pt-2">
+                                <button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg text-sm">Save</button>
+                                <button type="button" onClick={() => setShowAddLocationModal(false)} className="px-4 py-2 border border-slate-200 text-slate-600 font-medium rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {isManager && (
                 <div className="flex items-center gap-2">

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -15,8 +15,10 @@ import { Role, User, Location, Shift, AppState, RequestStatus, ChangeRequest, Re
 // SECURITY CONFIGURATION
 export const ALLOWED_DOMAINS = ['icecoldair.com']; // Add your internal domains here
 
-const STORAGE_KEY = 'shop_scheduler_pro_v2_8_callouts';
 const AUTH_KEY = 'shop_scheduler_pro_auth_v2_8';
+const CURRENT_USER_ID_KEY = 'shop_scheduler_pro_current_user_id_v2_8';
+
+const API_BASE = '';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -31,61 +33,93 @@ const DEFAULT_USERS: User[] = [
     { id: 'u2', name: 'Business Office', role: Role.BOM, email: 'office@icecoldair.com', password: 'password123', avatar: '', eligibleLocationIds: ['1', '2'] },
 ];
 
+const baseState: AppState = {
+    users: DEFAULT_USERS,
+    deletedUsers: [],
+    locations: DEFAULT_LOCATIONS,
+    shifts: [],
+    templates: [],
+    requests: [],
+    notifications: [],
+    currentUser: DEFAULT_USERS[0],
+};
+
+function resolveCurrentUser(users: User[]): User {
+    const id = typeof localStorage !== 'undefined' ? localStorage.getItem(CURRENT_USER_ID_KEY) : null;
+    const found = users.find(u => u.id === id);
+    return found || users[0] || DEFAULT_USERS[0];
+}
+
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-      return localStorage.getItem(AUTH_KEY) === 'true';
+      return typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_KEY) === 'true';
   });
   const [currentView, setCurrentView] = useState('dashboard');
   const [lastSaved, setLastSaved] = useState<number>(Date.now());
   const [isSaving, setIsSaving] = useState(false);
-  
-  const [state, setState] = useState<AppState>(() => {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const baseState: AppState = {
-          users: DEFAULT_USERS,
-          deletedUsers: [],
-          locations: DEFAULT_LOCATIONS,
-          shifts: [],
-          templates: [],
-          requests: [],
-          notifications: [],
-          currentUser: DEFAULT_USERS[0]
-      };
+  const [loading, setLoading] = useState(true);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-      if (saved) {
-          try {
-              const parsed = JSON.parse(saved);
-              return {
-                  ...baseState,
-                  ...parsed,
-                  users: (parsed.users && Array.isArray(parsed.users) && parsed.users.length > 0) ? parsed.users : DEFAULT_USERS,
-                  deletedUsers: Array.isArray(parsed.deletedUsers) ? parsed.deletedUsers : [],
-                  templates: Array.isArray(parsed.templates) ? parsed.templates : []
-              };
-          } catch (e) {
-              console.error("Storage load failure, reverting:", e);
-          }
-      }
-      return baseState;
-  });
+  const [state, setState] = useState<AppState>(() => ({ ...baseState }));
 
+  // Load state from SQLite API on mount
   useEffect(() => {
-      try {
-          const payload = JSON.stringify(state);
-          localStorage.setItem(STORAGE_KEY, payload);
-          const verified = localStorage.getItem(STORAGE_KEY);
-          if (verified && verified.length === payload.length) {
-              setLastSaved(Date.now());
-          }
+      let cancelled = false;
+      fetch(`${API_BASE}/api/state`)
+          .then(res => res.ok ? res.json() : Promise.reject(new Error('Not ok')))
+          .then((data: Omit<AppState, 'currentUser'>) => {
+              if (cancelled) return;
+              const users = (data.users && data.users.length > 0) ? data.users : DEFAULT_USERS;
+              const deletedUsers = Array.isArray(data.deletedUsers) ? data.deletedUsers : [];
+              const templates = Array.isArray(data.templates) ? data.templates : [];
+              setState({
+                  users,
+                  deletedUsers,
+                  locations: data.locations?.length ? data.locations : DEFAULT_LOCATIONS,
+                  shifts: data.shifts || [],
+                  templates,
+                  requests: data.requests || [],
+                  notifications: data.notifications || [],
+                  currentUser: resolveCurrentUser(users),
+              });
+          })
+          .catch(() => {
+              if (!cancelled) setState(prev => ({ ...prev }));
+          })
+          .finally(() => {
+              if (!cancelled) setLoading(false);
+          });
+      return () => { cancelled = true; };
+  }, []);
+
+  // Persist state to SQLite API (debounced)
+  useEffect(() => {
+      if (loading) return;
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+          saveTimeoutRef.current = null;
+          const { currentUser: _, ...payload } = state;
           setIsSaving(true);
-          const timer = setTimeout(() => setIsSaving(false), 800);
-          return () => clearTimeout(timer);
-      } catch (err) {
-          console.error("Sync Failed:", err);
-      }
-  }, [state]);
+          fetch(`${API_BASE}/api/state`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+          })
+              .then(res => {
+                  if (res.ok) setLastSaved(Date.now());
+              })
+              .catch(err => console.error('Sync Failed:', err))
+              .finally(() => {
+                  setTimeout(() => setIsSaving(false), 800);
+              });
+      }, 400);
+      return () => {
+          if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      };
+  }, [state, loading]);
 
   useEffect(() => {
+      if (typeof localStorage === 'undefined') return;
       localStorage.setItem(AUTH_KEY, isAuthenticated.toString());
   }, [isAuthenticated]);
 
@@ -93,11 +127,18 @@ const App: React.FC = () => {
       setState(prev => ({ ...prev, currentUser: user }));
       setIsAuthenticated(true);
       setCurrentView('dashboard');
+      if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(AUTH_KEY, 'true');
+          localStorage.setItem(CURRENT_USER_ID_KEY, user.id);
+      }
   };
 
   const handleLogout = () => {
       setIsAuthenticated(false);
-      localStorage.removeItem(AUTH_KEY);
+      if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(AUTH_KEY);
+          localStorage.removeItem(CURRENT_USER_ID_KEY);
+      }
   };
 
   const handleAddShifts = (newShifts: Partial<Shift>[]) => {
@@ -265,9 +306,10 @@ const App: React.FC = () => {
       });
   };
 
-  const handleAddLocation = (name: string, calendarId: string) => {
+  const handleAddLocation = (name: string, calendarId: string): string => {
       const newLoc: Location = { id: generateId(), name, calendarId };
       setState(prev => ({ ...prev, locations: [...prev.locations, newLoc] }));
+      return newLoc.id;
   };
 
   const handleRemoveLocation = (id: string) => {
@@ -307,6 +349,7 @@ const App: React.FC = () => {
             onSaveTemplate={handleSaveTemplate}
             onApplyTemplate={handleApplyTemplate}
             onRemoveTemplate={handleRemoveTemplate}
+            onAddLocation={handleAddLocation}
             currentUser={state.currentUser} 
           />;
           case 'requests': return <Requests requests={state.requests} users={state.users} currentUser={state.currentUser} onUpdateRequest={handleRequestUpdate} onRequestCreate={handleRequestCreate} onSendNotification={handleAddNotification} />;
@@ -333,6 +376,14 @@ const App: React.FC = () => {
           default: return <Dashboard users={state.users} shifts={state.shifts} requests={state.requests} notifications={state.notifications} currentUser={state.currentUser} />;
       }
   };
+
+  if (loading) {
+      return (
+          <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+              <div className="text-slate-500 font-medium">Loading…</div>
+          </div>
+      );
+  }
 
   if (!isAuthenticated) return <Login users={state.users} onLogin={handleLogin} />;
 

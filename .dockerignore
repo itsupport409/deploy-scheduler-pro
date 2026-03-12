@@ -8,3 +8,5 @@ dist
 .DS_Store
 Dockerfile
 .dockerignore
+# Don't bake local SQLite DB into image; DB is created at runtime
+data/

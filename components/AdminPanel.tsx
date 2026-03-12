@@ -36,11 +36,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    const data = localStorage.getItem('shop_scheduler_pro_v2_7_templates');
-    if (data) {
-        const size = (new TextEncoder().encode(data).length / 1024).toFixed(2);
-        setStorageSize(`${size} KB`);
-    }
+    fetch('/api/state/size')
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then((data: { sizeLabel?: string }) => setStorageSize(data.sizeLabel || '—'))
+      .catch(() => setStorageSize('—'));
   }, [users, locations, shifts, requests, notifications, deletedUsers]);
 
   const historicalRequests = useMemo(() => {
@@ -105,7 +104,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         <h2 className="text-2xl font-bold text-slate-800">Verified System Administration</h2>
         <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100 text-[10px] font-bold shadow-sm">
-                <CheckCircle size={14} /> PERSISTENCE ENGINE v2.8 ({storageSize})
+                <CheckCircle size={14} /> SQLite ({storageSize})
             </div>
         </div>
       </div>
@@ -183,7 +182,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
               <div className="flex justify-between items-start mb-6"><div><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Database className="text-indigo-500" size={20}/> System Persistence</h3><p className="text-xs text-slate-500 mt-1">State and backup recovery.</p></div><div className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-mono tracking-tighter border border-blue-500/30">v2.8_CALLOUTS</div></div>
-              <div className="flex flex-wrap gap-4"><button onClick={handleExportFullData} className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-bold shadow-lg transition-transform active:scale-95"><Save size={18} /> Export Full Backup</button><label className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-sm font-bold cursor-pointer transition-transform active:scale-95"><UploadCloud size={18} /> Import Database<input type="file" accept=".json" onChange={handleImportFullData} className="hidden" /></label><button onClick={() => { if(confirm("FINAL WARNING?")) { localStorage.clear(); window.location.reload(); } }} className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold ml-auto transition-colors"><ShieldAlert size={18} /> Format System</button></div>
+              <div className="flex flex-wrap gap-4"><button onClick={handleExportFullData} className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-bold shadow-lg transition-transform active:scale-95"><Save size={18} /> Export Full Backup</button><label className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-sm font-bold cursor-pointer transition-transform active:scale-95"><UploadCloud size={18} /> Import Database<input type="file" accept=".json" onChange={handleImportFullData} className="hidden" /></label><button onClick={() => { if(confirm("FINAL WARNING? This will reset the SQLite database to default users and clear all data.")) { fetch('/api/state/reset', { method: 'POST' }).then(() => { localStorage.clear(); window.location.reload(); }).catch(() => alert('Reset failed.')); } }} className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold ml-auto transition-colors"><ShieldAlert size={18} /> Format System</button></div>
           </div>
       </div>
     </div>
