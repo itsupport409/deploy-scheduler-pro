@@ -22,12 +22,9 @@ esbuild.buildSync({
   define: {
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
   },
+  // Bundle React, react-router-dom, and lucide-react so there is a single React instance
   external: [
-    'react',
-    'react-dom',
-    'lucide-react',
     'uuid',
-    'react-router-dom',
   ],
 });
 
