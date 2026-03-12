@@ -54,12 +54,22 @@ app.post('/api/state/reset', (req, res) => {
   }
 });
 
-// Serve static files from the 'dist' directory
-app.use(express.static(path.join(__dirname, 'dist')));
+// Serve static files from the 'dist' directory (explicit paths for Cloud Run)
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath));
 
-// Handle React routing, return all requests to index.html
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+// Explicitly serve index.html at root and index.js so 404s are avoided on some hosts
+app.get('/', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+app.get('/index.js', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.js'));
+});
+
+// SPA fallback: any other GET (except API) returns index.html
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 db.init().then(() => {
