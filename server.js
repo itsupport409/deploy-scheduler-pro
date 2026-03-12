@@ -54,6 +54,50 @@ app.post('/api/state/reset', (req, res) => {
   }
 });
 
+// API: draft email notification (server-side Gemini; no @google/genai in browser)
+app.post('/api/draft-notification', async (req, res) => {
+  try {
+    const { recipientName, changeType, status } = req.body || {};
+    if (!recipientName || !changeType || !status) {
+      return res.status(400).json({ error: 'Missing recipientName, changeType, or status' });
+    }
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const fallback = {
+      subject: `Schedule Update: ${changeType}`,
+      body: `Hi ${recipientName}, your ${changeType} request has been ${status}.`
+    };
+    if (!apiKey) return res.json(fallback);
+    const { GoogleGenAI, Type } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: `Draft a professional email for an employee named ${recipientName}. The status of their "${changeType}" request is now "${status}". Return JSON with "subject" and "body" fields.`,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            subject: { type: Type.STRING },
+            body: { type: Type.STRING }
+          },
+          required: ['subject', 'body']
+        }
+      }
+    });
+    const data = JSON.parse(response?.text || '{}');
+    res.json({
+      subject: data.subject || fallback.subject,
+      body: data.body || fallback.body
+    });
+  } catch (err) {
+    console.error('POST /api/draft-notification', err);
+    res.json({
+      subject: `Update: ${req.body?.changeType || 'Request'}`,
+      body: `Hi ${req.body?.recipientName || 'there'}, your request has been ${req.body?.status || 'updated'}. Check the app for details.`
+    });
+  }
+});
+
 // Serve static files from the 'dist' directory (explicit paths for Cloud Run)
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));

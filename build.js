@@ -28,7 +28,6 @@ esbuild.buildSync({
     'lucide-react',
     'uuid',
     'react-router-dom',
-    '@google/genai',
   ],
 });
 

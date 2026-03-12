@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChangeRequest, RequestStatus, Role, User, RequestType, Notification } from '../types';
 import { Check, X, Clock, Calendar, Timer, Mail, Loader2, Send, Lock as LockIcon, AlertCircle, Info, DollarSign, Square, CheckSquare, AlertTriangle, ArrowRight } from 'lucide-react';
-import { draftEmailNotification } from '../services/geminiService';
 
 interface RequestsProps {
   requests: ChangeRequest[];
@@ -53,13 +52,23 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
     }
   }, [newRequestDate, newRequestType]);
 
+  const draftEmailFromServer = async (recipientName: string, changeType: string, status: string): Promise<{ subject: string; body: string }> => {
+    const res = await fetch('/api/draft-notification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientName, changeType, status }),
+    });
+    const data = await res.json();
+    return { subject: data.subject || `Update: ${changeType}`, body: data.body || `Your request has been ${status}.` };
+  };
+
   const handleApprove = async (req: ChangeRequest) => {
     setProcessingId(req.id);
     onUpdateRequest(req.id, RequestStatus.APPROVED);
     const requester = users.find(u => u.id === req.requesterId);
-    if(requester) {
-       const { subject, body } = await draftEmailNotification(requester.name, req.type, 'Approved');
-       onSendNotification({ userId: requester.id, userName: requester.name, userEmail: requester.email, subject, content: body, type: 'EMAIL' });
+    if (requester) {
+      const { subject, body } = await draftEmailFromServer(requester.name, req.type, 'Approved');
+      onSendNotification({ userId: requester.id, userName: requester.name, userEmail: requester.email, subject, content: body, type: 'EMAIL' });
     }
     setProcessingId(null);
   };
@@ -68,9 +77,9 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
     setProcessingId(req.id);
     onUpdateRequest(req.id, RequestStatus.REJECTED);
     const requester = users.find(u => u.id === req.requesterId);
-    if(requester) {
-       const { subject, body } = await draftEmailNotification(requester.name, req.type, 'Rejected');
-       onSendNotification({ userId: requester.id, userName: requester.name, userEmail: requester.email, subject, content: body, type: 'EMAIL' });
+    if (requester) {
+      const { subject, body } = await draftEmailFromServer(requester.name, req.type, 'Rejected');
+      onSendNotification({ userId: requester.id, userName: requester.name, userEmail: requester.email, subject, content: body, type: 'EMAIL' });
     }
     setProcessingId(null);
   };
