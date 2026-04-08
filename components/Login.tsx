@@ -34,7 +34,7 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
     }
 
     const user = users.find(u => u.email.toLowerCase() === cleanEmail);
-    
+
     if (user) {
         if (user.password === password) {
             // Check if 2FA is required
@@ -45,7 +45,20 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
                 setStep('2fa');
                 setError('');
             } else {
-                onLogin(user);
+                // Send login to server to establish session
+                fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: cleanEmail, password })
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('Login failed')))
+                    .then(data => {
+                        onLogin(data.user);
+                    })
+                    .catch(err => {
+                        console.error('Login error:', err);
+                        setError('Login failed. Please try again.');
+                    });
             }
         } else {
             setError('Access Denied: Incorrect password.');
@@ -58,7 +71,20 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
   const handleVerifySubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (verificationCode === sentCode && tempUser) {
-          onLogin(tempUser);
+          // Send login to server to establish session
+          fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: tempUser.email, password })
+          })
+              .then(res => res.ok ? res.json() : Promise.reject(new Error('Login failed')))
+              .then(data => {
+                  onLogin(data.user);
+              })
+              .catch(err => {
+                  console.error('Login error:', err);
+                  setError('Login failed. Please try again.');
+              });
       } else {
           setError('Invalid verification code. Please try again.');
       }

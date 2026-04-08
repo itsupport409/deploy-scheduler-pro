@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const session = require('express-session');
 const db = require('./db');
 
 const app = express();
@@ -7,8 +8,108 @@ const PORT = process.env.PORT || 3003;
 
 app.use(express.json({ limit: '10mb' }));
 
-// API: get full state (no currentUser - client rehydrates from users + localStorage)
-app.get('/api/state', (req, res) => {
+// Session middleware with secure cookie settings
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'shop-scheduler-pro-secret-change-in-prod',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true, // Prevent JS access
+    sameSite: 'strict',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Middleware to check authentication
+function requireAuth(req, res, next) {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// API: login endpoint
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Missing email or password' });
+    }
+
+    const state = db.getState();
+    const user = state.users.find(u => u.email === email);
+
+    if (!user || user.password !== password) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Set session
+    req.session.userId = user.id;
+    req.session.userEmail = user.email;
+    req.session.userName = user.name;
+
+    const userData = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      eligibleLocationIds: user.eligibleLocationIds
+    };
+
+    res.json({ ok: true, user: userData });
+  } catch (err) {
+    console.error('POST /api/auth/login', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// API: logout endpoint
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
+  });
+});
+
+// API: check current session
+app.get('/api/auth/me', (req, res) => {
+  if (!req.session.userId) {
+    return res.json({ authenticated: false, user: null });
+  }
+
+  try {
+    const state = db.getState();
+    const user = state.users.find(u => u.id === req.session.userId);
+
+    if (!user) {
+      req.session.destroy();
+      return res.json({ authenticated: false, user: null });
+    }
+
+    res.json({
+      authenticated: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        eligibleLocationIds: user.eligibleLocationIds
+      }
+    });
+  } catch (err) {
+    console.error('GET /api/auth/me', err);
+    res.status(500).json({ error: 'Failed to check session' });
+  }
+});
+
+// API: get full state (requires authentication)
+app.get('/api/state', requireAuth, (req, res) => {
   try {
     const state = db.getState();
     res.json(state);
@@ -18,8 +119,8 @@ app.get('/api/state', (req, res) => {
   }
 });
 
-// API: save full state
-app.post('/api/state', (req, res) => {
+// API: save full state (requires authentication)
+app.post('/api/state', requireAuth, (req, res) => {
   try {
     const payload = req.body;
     if (!payload || typeof payload !== 'object') {

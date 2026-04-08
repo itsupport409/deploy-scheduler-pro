@@ -15,9 +15,6 @@ import { Role, User, Location, Shift, AppState, RequestStatus, ChangeRequest, Re
 // SECURITY CONFIGURATION
 export const ALLOWED_DOMAINS = ['icecoldair.com']; // Add your internal domains here
 
-const AUTH_KEY = 'shop_scheduler_pro_auth_v2_8';
-const CURRENT_USER_ID_KEY = 'shop_scheduler_pro_current_user_id_v2_8';
-
 const API_BASE = '';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -45,15 +42,12 @@ const baseState: AppState = {
 };
 
 function resolveCurrentUser(users: User[]): User {
-    const id = typeof localStorage !== 'undefined' ? localStorage.getItem(CURRENT_USER_ID_KEY) : null;
-    const found = users.find(u => u.id === id);
-    return found || users[0] || DEFAULT_USERS[0];
+    return users[0] || DEFAULT_USERS[0];
 }
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-      return typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_KEY) === 'true';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('dashboard');
   const [lastSaved, setLastSaved] = useState<number>(Date.now());
   const [isSaving, setIsSaving] = useState(false);
@@ -62,29 +56,46 @@ const App: React.FC = () => {
 
   const [state, setState] = useState<AppState>(() => ({ ...baseState }));
 
-  // Load state from SQLite API on mount
+  // Check session and load state on mount
   useEffect(() => {
       let cancelled = false;
-      fetch(`${API_BASE}/api/state`)
-          .then(res => res.ok ? res.json() : Promise.reject(new Error('Not ok')))
-          .then((data: Omit<AppState, 'currentUser'>) => {
+      Promise.all([
+          fetch(`${API_BASE}/api/auth/me`).then(res => res.json()),
+          fetch(`${API_BASE}/api/state`).then(res => res.ok ? res.json() : Promise.reject(new Error('Not ok')))
+      ])
+          .then(([authData, stateData]: any) => {
               if (cancelled) return;
-              const users = (data.users && data.users.length > 0) ? data.users : DEFAULT_USERS;
-              const deletedUsers = Array.isArray(data.deletedUsers) ? data.deletedUsers : [];
-              const templates = Array.isArray(data.templates) ? data.templates : [];
+
+              // Check authentication
+              if (authData.authenticated && authData.user) {
+                  setIsAuthenticated(true);
+                  setCurrentUser(authData.user);
+              } else {
+                  setIsAuthenticated(false);
+                  setCurrentUser(null);
+              }
+
+              // Load app state
+              const users = (stateData.users && stateData.users.length > 0) ? stateData.users : DEFAULT_USERS;
+              const deletedUsers = Array.isArray(stateData.deletedUsers) ? stateData.deletedUsers : [];
+              const templates = Array.isArray(stateData.templates) ? stateData.templates : [];
+
               setState({
                   users,
                   deletedUsers,
-                  locations: data.locations?.length ? data.locations : DEFAULT_LOCATIONS,
-                  shifts: data.shifts || [],
+                  locations: stateData.locations?.length ? stateData.locations : DEFAULT_LOCATIONS,
+                  shifts: stateData.shifts || [],
                   templates,
-                  requests: data.requests || [],
-                  notifications: data.notifications || [],
-                  currentUser: resolveCurrentUser(users),
+                  requests: stateData.requests || [],
+                  notifications: stateData.notifications || [],
+                  currentUser: authData.user || resolveCurrentUser(users),
               });
           })
-          .catch(() => {
-              if (!cancelled) setState(prev => ({ ...prev }));
+          .catch((err) => {
+              if (!cancelled) {
+                  console.error('Failed to load initial state:', err);
+                  setState(prev => ({ ...prev }));
+              }
           })
           .finally(() => {
               if (!cancelled) setLoading(false);
@@ -118,27 +129,24 @@ const App: React.FC = () => {
       };
   }, [state, loading]);
 
-  useEffect(() => {
-      if (typeof localStorage === 'undefined') return;
-      localStorage.setItem(AUTH_KEY, isAuthenticated.toString());
-  }, [isAuthenticated]);
 
   const handleLogin = (user: User) => {
+      // Note: Login is handled by Login component via /api/auth/login
+      // This function is called after successful session creation
+      setCurrentUser(user);
       setState(prev => ({ ...prev, currentUser: user }));
       setIsAuthenticated(true);
       setCurrentView('dashboard');
-      if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(AUTH_KEY, 'true');
-          localStorage.setItem(CURRENT_USER_ID_KEY, user.id);
-      }
   };
 
   const handleLogout = () => {
-      setIsAuthenticated(false);
-      if (typeof localStorage !== 'undefined') {
-          localStorage.removeItem(AUTH_KEY);
-          localStorage.removeItem(CURRENT_USER_ID_KEY);
-      }
+      fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' })
+          .then(() => {
+              setIsAuthenticated(false);
+              setCurrentUser(null);
+              setState(prev => ({ ...prev, currentUser: DEFAULT_USERS[0] }));
+          })
+          .catch(err => console.error('Logout failed:', err));
   };
 
   const handleAddShifts = (newShifts: Partial<Shift>[]) => {
@@ -385,7 +393,7 @@ const App: React.FC = () => {
       );
   }
 
-  if (!isAuthenticated) return <Login users={state.users} onLogin={handleLogin} />;
+  if (!isAuthenticated || !currentUser) return <Login users={state.users} onLogin={handleLogin} />;
 
   return (
     <HashRouter>
