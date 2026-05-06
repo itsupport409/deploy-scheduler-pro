@@ -15,11 +15,21 @@ const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, onChangePassword
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [error, setError] = useState('');
 
-  const handleChangePasswordSubmit = (e: React.FormEvent) => {
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (passwordForm.current !== currentUser.password) { setError('Incorrect current password.'); return; }
       if (passwordForm.new.length < 4) { setError('New password too short.'); return; }
       if (passwordForm.new !== passwordForm.confirm) { setError('Passwords do not match.'); return; }
+      // Verify current password server-side (passwords are not stored in client state)
+      try {
+          const res = await fetch('/api/auth/pre-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: currentUser.email, password: passwordForm.current })
+          });
+          if (!res.ok) { setError('Incorrect current password.'); return; }
+      } catch {
+          setError('Could not verify current password. Please try again.'); return;
+      }
       onChangePassword(currentUser.id, passwordForm.new);
       setShowPasswordModal(false);
       setPasswordForm({ current: '', new: '', confirm: '' });

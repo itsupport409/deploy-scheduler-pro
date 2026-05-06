@@ -275,6 +275,14 @@ function getState() {
 
 function setState(payload) {
   const database = getDb();
+
+  // Snapshot existing passwords before wiping so they survive a client save
+  // (the GET /api/state response strips passwords, so the client never sends them back)
+  const existingPasswords = {};
+  const userRows = runQuery(database, 'SELECT id, password FROM users');
+  const deletedRows = runQuery(database, 'SELECT id, password FROM deleted_users');
+  for (const r of [...userRows, ...deletedRows]) existingPasswords[r.id] = r.password;
+
   database.run('DELETE FROM users');
   database.run('DELETE FROM deleted_users');
   database.run('DELETE FROM locations');
@@ -285,15 +293,17 @@ function setState(payload) {
   database.run('DELETE FROM notifications');
 
   for (const u of payload.users || []) {
+    const password = u.password || existingPasswords[u.id] || '';
     database.run(
       'INSERT INTO users (id, name, role, email, password, avatar, eligible_location_ids) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [u.id, u.name, u.role, u.email, u.password || '', u.avatar || '', JSON.stringify(u.eligibleLocationIds || [])]
+      [u.id, u.name, u.role, u.email, password, u.avatar || '', JSON.stringify(u.eligibleLocationIds || [])]
     );
   }
   for (const u of payload.deletedUsers || []) {
+    const password = u.password || existingPasswords[u.id] || '';
     database.run(
       'INSERT INTO deleted_users (id, name, role, email, password, avatar, eligible_location_ids) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [u.id, u.name, u.role, u.email, u.password || '', u.avatar || '', JSON.stringify(u.eligibleLocationIds || [])]
+      [u.id, u.name, u.role, u.email, password, u.avatar || '', JSON.stringify(u.eligibleLocationIds || [])]
     );
   }
   for (const loc of payload.locations || []) {

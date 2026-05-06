@@ -25,9 +25,9 @@ const DEFAULT_LOCATIONS: Location[] = [
 ];
 
 const DEFAULT_USERS: User[] = [
-    { id: 'u0', name: 'A Butler', role: Role.ADMIN, email: 'abutler@icecoldair.com', password: 'password123', avatar: '', eligibleLocationIds: ['1', '2'] },
-    { id: 'u1', name: 'Scott S', role: Role.GM, email: 'scotts@icecoldair.com', password: 'password123', avatar: '', eligibleLocationIds: ['1', '2'] },
-    { id: 'u2', name: 'Business Office', role: Role.BOM, email: 'office@icecoldair.com', password: 'password123', avatar: '', eligibleLocationIds: ['1', '2'] },
+    { id: 'u0', name: 'A Butler', role: Role.ADMIN, email: 'abutler@icecoldair.com', avatar: '', eligibleLocationIds: ['1', '2'] },
+    { id: 'u1', name: 'Scott S', role: Role.GM, email: 'scotts@icecoldair.com', avatar: '', eligibleLocationIds: ['1', '2'] },
+    { id: 'u2', name: 'Business Office', role: Role.BOM, email: 'office@icecoldair.com', avatar: '', eligibleLocationIds: ['1', '2'] },
 ];
 
 const baseState: AppState = {
@@ -53,49 +53,48 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guard: only allow the debounced save after state has been populated from the server.
+  // Without this, a fresh-browser login would save the empty baseState over real DB data.
+  const stateLoadedRef = useRef(false);
 
   const [state, setState] = useState<AppState>(() => ({ ...baseState }));
 
-  // Check session and load state on mount
+  const loadStateFromServer = async (user: User): Promise<void> => {
+      const res = await fetch(`${API_BASE}/api/state`);
+      if (!res.ok) throw new Error('Failed to load state');
+      const stateData = await res.json();
+      const users = stateData.users?.length ? stateData.users : DEFAULT_USERS;
+      setState({
+          users,
+          deletedUsers: Array.isArray(stateData.deletedUsers) ? stateData.deletedUsers : [],
+          locations: stateData.locations?.length ? stateData.locations : DEFAULT_LOCATIONS,
+          shifts: stateData.shifts || [],
+          templates: Array.isArray(stateData.templates) ? stateData.templates : [],
+          requests: stateData.requests || [],
+          notifications: stateData.notifications || [],
+          currentUser: user,
+      });
+  };
+
+  // Check session and load state on mount (sequential: auth first, then state)
   useEffect(() => {
       let cancelled = false;
-      Promise.all([
-          fetch(`${API_BASE}/api/auth/me`).then(res => res.json()),
-          fetch(`${API_BASE}/api/state`).then(res => res.ok ? res.json() : Promise.reject(new Error('Not ok')))
-      ])
-          .then(([authData, stateData]: any) => {
+      fetch(`${API_BASE}/api/auth/me`)
+          .then(res => res.json())
+          .then(async (authData: any) => {
               if (cancelled) return;
-
-              // Check authentication
               if (authData.authenticated && authData.user) {
                   setIsAuthenticated(true);
                   setCurrentUser(authData.user);
+                  await loadStateFromServer(authData.user);
+                  if (!cancelled) stateLoadedRef.current = true;
               } else {
                   setIsAuthenticated(false);
                   setCurrentUser(null);
               }
-
-              // Load app state
-              const users = (stateData.users && stateData.users.length > 0) ? stateData.users : DEFAULT_USERS;
-              const deletedUsers = Array.isArray(stateData.deletedUsers) ? stateData.deletedUsers : [];
-              const templates = Array.isArray(stateData.templates) ? stateData.templates : [];
-
-              setState({
-                  users,
-                  deletedUsers,
-                  locations: stateData.locations?.length ? stateData.locations : DEFAULT_LOCATIONS,
-                  shifts: stateData.shifts || [],
-                  templates,
-                  requests: stateData.requests || [],
-                  notifications: stateData.notifications || [],
-                  currentUser: authData.user || resolveCurrentUser(users),
-              });
           })
           .catch((err) => {
-              if (!cancelled) {
-                  console.error('Failed to load initial state:', err);
-                  setState(prev => ({ ...prev }));
-              }
+              if (!cancelled) console.error('Failed to load initial session/state:', err);
           })
           .finally(() => {
               if (!cancelled) setLoading(false);
@@ -103,9 +102,12 @@ const App: React.FC = () => {
       return () => { cancelled = true; };
   }, []);
 
-  // Persist state to SQLite API (debounced)
+  // Persist state to SQLite API (debounced).
+  // Only fires once stateLoadedRef is true (real server data is in state) and user is authenticated.
   useEffect(() => {
       if (loading) return;
+      if (!isAuthenticated) return;
+      if (!stateLoadedRef.current) return;
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
           saveTimeoutRef.current = null;
@@ -127,24 +129,29 @@ const App: React.FC = () => {
       return () => {
           if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       };
-  }, [state, loading]);
+  }, [state, loading, isAuthenticated]);
 
 
-  const handleLogin = (user: User) => {
-      // Note: Login is handled by Login component via /api/auth/login
-      // This function is called after successful session creation
+  const handleLogin = async (user: User) => {
       setCurrentUser(user);
-      setState(prev => ({ ...prev, currentUser: user }));
       setIsAuthenticated(true);
       setCurrentView('dashboard');
+      try {
+          await loadStateFromServer(user);
+      } catch (err) {
+          console.error('Failed to load state after login:', err);
+          setState(prev => ({ ...prev, currentUser: user }));
+      }
+      stateLoadedRef.current = true;
   };
 
   const handleLogout = () => {
       fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' })
           .then(() => {
+              stateLoadedRef.current = false;
               setIsAuthenticated(false);
               setCurrentUser(null);
-              setState(prev => ({ ...prev, currentUser: DEFAULT_USERS[0] }));
+              setState({ ...baseState });
           })
           .catch(err => console.error('Logout failed:', err));
   };
@@ -393,7 +400,7 @@ const App: React.FC = () => {
       );
   }
 
-  if (!isAuthenticated || !currentUser) return <Login users={state.users} onLogin={handleLogin} />;
+  if (!isAuthenticated || !currentUser) return <Login onLogin={handleLogin} />;
 
   return (
     <HashRouter>

@@ -108,10 +108,43 @@ app.get('/api/auth/me', (req, res) => {
   }
 });
 
-// API: get full state (requires authentication)
+// API: pre-login — validate credentials and return user info + role without creating a session.
+// Used by the client to determine if 2FA is required before committing a session.
+app.post('/api/auth/pre-login', (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Missing email or password' });
+    }
+    const state = db.getState();
+    const user = state.users.find(u => u.email === email);
+    if (!user || user.password !== password) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    res.json({
+      ok: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        eligibleLocationIds: user.eligibleLocationIds
+      }
+    });
+  } catch (err) {
+    console.error('POST /api/auth/pre-login', err);
+    res.status(500).json({ error: 'Pre-login check failed' });
+  }
+});
+
+// API: get full state (requires authentication) — passwords are stripped before sending to client
 app.get('/api/state', requireAuth, (req, res) => {
   try {
     const state = db.getState();
+    // Never send passwords to the browser
+    state.users = state.users.map(({ password, ...u }) => u);
+    state.deletedUsers = (state.deletedUsers || []).map(({ password, ...u }) => u);
     res.json(state);
   } catch (err) {
     console.error('GET /api/state', err);

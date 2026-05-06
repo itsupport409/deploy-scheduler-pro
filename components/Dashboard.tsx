@@ -140,7 +140,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
                     <div className="relative z-10">
                         <h3 className="font-black text-xl mb-2 tracking-tight">System Reliability</h3>
                         <p className="text-slate-300 text-sm mb-6 max-w-md leading-relaxed">
-                            Your HR data is synchronized using an Atomic Persistence engine. This ensures that every shift change and notification is logged securely to local storage with a verified timestamp.
+                            Your HR data is synchronized using an Atomic Persistence engine. This ensures that every shift change and notification is saved securely to the server database with a verified timestamp.
                         </p>
                         <div className="flex items-center gap-4">
                             <div className="h-1 w-24 bg-indigo-500 rounded-full"></div>

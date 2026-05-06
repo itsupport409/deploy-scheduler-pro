@@ -5,16 +5,15 @@ import { Lock, ShieldCheck, ArrowLeft, Mail, Building2, Globe, AlertCircle } fro
 import { ALLOWED_DOMAINS } from '../App';
 
 interface LoginProps {
-  users: User[];
   onLogin: (user: User) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
+const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [step, setStep] = useState<'login' | '2fa'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  
+
   // 2FA State
   const [tempUser, setTempUser] = useState<User | null>(null);
   const [verificationCode, setVerificationCode] = useState('');
@@ -33,45 +32,43 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
         return;
     }
 
-    const user = users.find(u => u.email.toLowerCase() === cleanEmail);
-
-    if (user) {
-        if (user.password === password) {
-            // Check if 2FA is required
+    // Validate credentials server-side and get the user's role (no session created yet)
+    fetch('/api/auth/pre-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password })
+    })
+        .then(res => res.ok ? res.json() : Promise.reject(new Error('Invalid credentials')))
+        .then(data => {
+            const user: User = data.user;
             if (ROLES_REQUIRING_2FA.includes(user.role)) {
+                // Require 2FA before creating a session
                 const code = Math.floor(100000 + Math.random() * 900000).toString();
                 setSentCode(code);
                 setTempUser(user);
                 setStep('2fa');
                 setError('');
             } else {
-                // Send login to server to establish session
-                fetch('/api/auth/login', {
+                // No 2FA needed — create the session now
+                return fetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: cleanEmail, password })
                 })
                     .then(res => res.ok ? res.json() : Promise.reject(new Error('Login failed')))
-                    .then(data => {
-                        onLogin(data.user);
-                    })
-                    .catch(err => {
-                        console.error('Login error:', err);
-                        setError('Login failed. Please try again.');
-                    });
+                    .then(loginData => onLogin(loginData.user));
             }
-        } else {
-            setError('Access Denied: Incorrect password.');
-        }
-    } else {
-      setError('Access Denied: Identity not found in verified staff roster.');
-    }
+        })
+        .catch(err => {
+            console.error('Login error:', err);
+            setError('Access Denied: Incorrect credentials or identity not found in the verified staff roster.');
+        });
   };
 
   const handleVerifySubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (verificationCode === sentCode && tempUser) {
-          // Send login to server to establish session
+          // 2FA passed — create the session now
           fetch('/api/auth/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
