@@ -1,11 +1,20 @@
 const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
+const { Storage } = require('@google-cloud/storage');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'scheduler.db');
+const DB_OBJECT_NAME = 'scheduler.db';
+
+// Cloud Run sets K_SERVICE automatically. When present, persist the SQLite
+// file to a GCS bucket since the local filesystem (/tmp) is wiped on every
+// container restart. Locally we keep using the on-disk file in DATA_DIR.
+const USE_GCS = !!process.env.K_SERVICE;
+const GCS_LOCATION = process.env.GCS_LOCATION || 'US';
 
 let db = null;
+let gcsBucket = null;
 
 const DEFAULT_LOCATIONS = [
   { id: '1', name: 'Downtown Service Center', calendarId: 'icecoldair_downtown@group.calendar.google.com' },
@@ -24,11 +33,66 @@ function ensureDataDir() {
   }
 }
 
-function saveDb() {
+async function saveDb() {
   if (!db) return;
   ensureDataDir();
   const data = db.export();
   fs.writeFileSync(DB_PATH, Buffer.from(data));
+  if (gcsBucket) {
+    await gcsBucket.upload(DB_PATH, { destination: DB_OBJECT_NAME, resumable: false });
+  }
+}
+
+async function fetchProjectIdFromMetadata() {
+  try {
+    const res = await fetch('http://metadata.google.internal/computeMetadata/v1/project/project-id', {
+      headers: { 'Metadata-Flavor': 'Google' },
+    });
+    if (!res.ok) return null;
+    return (await res.text()).trim();
+  } catch {
+    return null;
+  }
+}
+
+async function initGcs() {
+  if (!USE_GCS) return;
+  const storage = new Storage();
+  const projectId =
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.GCLOUD_PROJECT ||
+    (await fetchProjectIdFromMetadata()) ||
+    (await storage.getProjectId().catch(() => null));
+
+  if (!projectId) {
+    console.warn('GCS persistence: could not determine project ID — falling back to ephemeral /tmp');
+    return;
+  }
+
+  // Bucket names must be globally unique. Project IDs are globally unique, so
+  // prefixing with the project ID guarantees uniqueness for this deployment.
+  const bucketName = process.env.GCS_BUCKET || `${projectId}-scheduler-db`;
+  const bucket = storage.bucket(bucketName);
+
+  const [exists] = await bucket.exists();
+  if (!exists) {
+    await storage.createBucket(bucketName, { location: GCS_LOCATION });
+    console.log(`GCS persistence: created bucket ${bucketName}`);
+  } else {
+    console.log(`GCS persistence: using existing bucket ${bucketName}`);
+  }
+
+  // Pull the existing database down so this fresh container picks up the
+  // state the previous container left behind.
+  ensureDataDir();
+  const file = bucket.file(DB_OBJECT_NAME);
+  const [fileExists] = await file.exists();
+  if (fileExists) {
+    await file.download({ destination: DB_PATH });
+    console.log('GCS persistence: restored scheduler.db from bucket');
+  }
+
+  gcsBucket = bucket;
 }
 
 function rowArrayToObjects(columns, rows) {
@@ -148,32 +212,32 @@ function seedIfEmpty(database) {
   }
 }
 
-function init() {
-  if (db) return Promise.resolve();
-  return initSqlJs().then(SQLite => {
-    ensureDataDir();
-    if (fs.existsSync(DB_PATH)) {
-      const fileBuffer = fs.readFileSync(DB_PATH);
-      db = new SQLite.Database(fileBuffer);
-    } else {
-      db = new SQLite.Database();
-      initSchema(db);
+async function init() {
+  if (db) return;
+  const SQLite = await initSqlJs();
+  await initGcs();
+  ensureDataDir();
+  if (fs.existsSync(DB_PATH)) {
+    const fileBuffer = fs.readFileSync(DB_PATH);
+    db = new SQLite.Database(fileBuffer);
+  } else {
+    db = new SQLite.Database();
+    initSchema(db);
+    seedIfEmpty(db);
+    await saveDb();
+  }
+  const tables = runQuery(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
+  if (tables.length === 0) {
+    initSchema(db);
+    seedIfEmpty(db);
+    await saveDb();
+  } else {
+    const userCount = runQuery(db, 'SELECT COUNT(*) AS n FROM users')[0];
+    if (userCount && userCount.n === 0) {
       seedIfEmpty(db);
-      saveDb();
+      await saveDb();
     }
-    const tables = runQuery(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
-    if (tables.length === 0) {
-      initSchema(db);
-      seedIfEmpty(db);
-      saveDb();
-    } else {
-      const userCount = runQuery(db, 'SELECT COUNT(*) AS n FROM users')[0];
-      if (userCount && userCount.n === 0) {
-        seedIfEmpty(db);
-        saveDb();
-      }
-    }
-  });
+  }
 }
 
 function getDb() {
@@ -273,7 +337,7 @@ function getState() {
   };
 }
 
-function setState(payload) {
+async function setState(payload) {
   const database = getDb();
 
   // Snapshot existing passwords before wiping so they survive a client save
@@ -337,7 +401,7 @@ function setState(payload) {
     );
   }
 
-  saveDb();
+  await saveDb();
 }
 
 function getDbSize() {
@@ -351,7 +415,7 @@ function getDbSize() {
   }
 }
 
-function resetDatabase() {
+async function resetDatabase() {
   const database = getDb();
   database.run('DELETE FROM notifications');
   database.run('DELETE FROM requests');
@@ -362,7 +426,7 @@ function resetDatabase() {
   database.run('DELETE FROM deleted_users');
   database.run('DELETE FROM users');
   seedIfEmpty(database);
-  saveDb();
+  await saveDb();
 }
 
 module.exports = {

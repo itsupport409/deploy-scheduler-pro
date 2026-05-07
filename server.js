@@ -153,13 +153,13 @@ app.get('/api/state', requireAuth, (req, res) => {
 });
 
 // API: save full state (requires authentication)
-app.post('/api/state', requireAuth, (req, res) => {
+app.post('/api/state', requireAuth, async (req, res) => {
   try {
     const payload = req.body;
     if (!payload || typeof payload !== 'object') {
       return res.status(400).json({ error: 'Invalid payload' });
     }
-    db.setState(payload);
+    await db.setState(payload);
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /api/state', err);
@@ -178,9 +178,9 @@ app.get('/api/state/size', (req, res) => {
 });
 
 // API: reset database to seed data (Format System)
-app.post('/api/state/reset', (req, res) => {
+app.post('/api/state/reset', async (req, res) => {
   try {
-    db.resetDatabase();
+    await db.resetDatabase();
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /api/state/reset', err);
