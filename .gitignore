@@ -30,3 +30,7 @@ Thumbs.db
 
 # Optional
 .cache/
+
+# Firebase service account keys — never commit private keys
+*-firebase-adminsdk-*.json
+serviceAccountKey.json

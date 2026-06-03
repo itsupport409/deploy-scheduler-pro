@@ -1,194 +1,159 @@
 const express = require('express');
 const path = require('path');
-const session = require('express-session');
-const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3003;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Session middleware with secure cookie settings
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'shop-scheduler-pro-secret-change-in-prod',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    httpOnly: true, // Prevent JS access
-    sameSite: 'strict',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
+// Firebase Admin SDK — credentials resolved in priority order:
+//   1. FIREBASE_SERVICE_ACCOUNT env var (JSON string)
+//   2. GOOGLE_APPLICATION_CREDENTIALS env var (path to key file)
+//   3. Any *-firebase-adminsdk-*.json file in the project directory
+// User management endpoints return 503 if admin is not configured.
+const fs = require('fs');
+const admin = require('firebase-admin');
+let adminAuth = null;
 
-// Middleware to check authentication
-function requireAuth(req, res, next) {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
+function findLocalServiceAccountFile() {
+  try {
+    const files = fs.readdirSync(__dirname).filter(f => /-firebase-adminsdk-.*\.json$/.test(f));
+    return files.length > 0 ? path.join(__dirname, files[0]) : null;
+  } catch { return null; }
 }
 
-// API: login endpoint
-app.post('/api/auth/login', (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Missing email or password' });
-    }
-
-    const state = db.getState();
-    const user = state.users.find(u => u.email === email);
-
-    if (!user || user.password !== password) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Set session
-    req.session.userId = user.id;
-    req.session.userEmail = user.email;
-    req.session.userName = user.name;
-
-    const userData = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      avatar: user.avatar,
-      eligibleLocationIds: user.eligibleLocationIds
-    };
-
-    res.json({ ok: true, user: userData });
-  } catch (err) {
-    console.error('POST /api/auth/login', err);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-// API: logout endpoint
-app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      return res.status(500).json({ error: 'Logout failed' });
-    }
-    res.clearCookie('connect.sid');
-    res.json({ ok: true });
-  });
-});
-
-// API: check current session
-app.get('/api/auth/me', (req, res) => {
-  if (!req.session.userId) {
-    return res.json({ authenticated: false, user: null });
-  }
-
-  try {
-    const state = db.getState();
-    const user = state.users.find(u => u.id === req.session.userId);
-
-    if (!user) {
-      req.session.destroy();
-      return res.json({ authenticated: false, user: null });
-    }
-
-    res.json({
-      authenticated: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        eligibleLocationIds: user.eligibleLocationIds
-      }
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: 'https://firebase-db-project-496801-default-rtdb.firebaseio.com'
     });
-  } catch (err) {
-    console.error('GET /api/auth/me', err);
-    res.status(500).json({ error: 'Failed to check session' });
-  }
-});
-
-// API: pre-login — validate credentials and return user info + role without creating a session.
-// Used by the client to determine if 2FA is required before committing a session.
-app.post('/api/auth/pre-login', (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Missing email or password' });
-    }
-    const state = db.getState();
-    const user = state.users.find(u => u.email === email);
-    if (!user || user.password !== password) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    res.json({
-      ok: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        eligibleLocationIds: user.eligibleLocationIds
-      }
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    admin.initializeApp({
+      databaseURL: 'https://firebase-db-project-496801-default-rtdb.firebaseio.com'
     });
-  } catch (err) {
-    console.error('POST /api/auth/pre-login', err);
-    res.status(500).json({ error: 'Pre-login check failed' });
-  }
-});
-
-// API: get full state (requires authentication) — passwords are stripped before sending to client
-app.get('/api/state', requireAuth, (req, res) => {
-  try {
-    const state = db.getState();
-    // Never send passwords to the browser
-    state.users = state.users.map(({ password, ...u }) => u);
-    state.deletedUsers = (state.deletedUsers || []).map(({ password, ...u }) => u);
-    res.json(state);
-  } catch (err) {
-    console.error('GET /api/state', err);
-    res.status(500).json({ error: 'Failed to load state' });
-  }
-});
-
-// API: save full state (requires authentication)
-app.post('/api/state', requireAuth, async (req, res) => {
-  try {
-    const payload = req.body;
-    if (!payload || typeof payload !== 'object') {
-      return res.status(400).json({ error: 'Invalid payload' });
+  } else {
+    const localKeyFile = findLocalServiceAccountFile();
+    if (localKeyFile) {
+      const serviceAccount = JSON.parse(fs.readFileSync(localKeyFile, 'utf8'));
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: 'https://firebase-db-project-496801-default-rtdb.firebaseio.com'
+      });
+      console.log(`Firebase Admin: loaded credentials from ${path.basename(localKeyFile)}`);
+    } else {
+      console.warn('Firebase Admin: no credentials found — user management endpoints will return 503. Set FIREBASE_SERVICE_ACCOUNT to enable them.');
     }
-    await db.setState(payload);
+  }
+  if (admin.apps.length > 0) {
+    adminAuth = admin.auth();
+    // Pre-warm: fetch OAuth token now so the first real API call never hits a cold credential
+    adminAuth.listUsers(1).then(() => {
+      console.log('Firebase Admin initialized and credential pre-warmed.');
+    }).catch(e => {
+      console.warn('Firebase Admin initialized but pre-warm failed (will retry on first use):', e.message);
+    });
+  }
+} catch (err) {
+  console.warn('Firebase Admin init failed:', err.message);
+}
+
+const DB_URL = 'https://firebase-db-project-496801-default-rtdb.firebaseio.com';
+
+const DEFAULT_LOCATIONS = [
+  { id: '1', name: 'Downtown Service Center', calendarId: 'icecoldair_downtown@group.calendar.google.com' },
+  { id: '2', name: 'Westside Rapid Repair', calendarId: 'icecoldair_westside@group.calendar.google.com' },
+];
+
+const DEFAULT_USERS = [
+  { id: 'u0', name: 'A Butler', role: 'Administrator', email: 'abutler@icecoldair.com', avatar: '', eligibleLocationIds: ['1', '2'] },
+];
+
+function adminRequired(res) {
+  if (!adminAuth) {
+    res.status(503).json({ error: 'Firebase Admin SDK not configured. Set the FIREBASE_SERVICE_ACCOUNT environment variable.' });
+    return false;
+  }
+  return true;
+}
+
+// Create a Firebase Auth user (admin adds staff)
+app.post('/api/users/create', async (req, res) => {
+  if (!adminRequired(res)) return;
+  const { email, password, displayName } = req.body;
+  // Retry once — first call can fail while OAuth token warms up
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const userRecord = await adminAuth.createUser({ email, password, displayName });
+      return res.json({ ok: true, uid: userRecord.uid });
+    } catch (err) {
+      const isTokenErr = err.message?.includes('fetch a valid Google OAuth2');
+      if (attempt === 1 && isTokenErr) {
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      console.error('Create user error:', err.message);
+      return res.status(400).json({ error: err.message });
+    }
+  }
+});
+
+// Delete a Firebase Auth user by email (admin removes staff)
+app.post('/api/users/delete', async (req, res) => {
+  if (!adminRequired(res)) return;
+  try {
+    const { email } = req.body;
+    const userRecord = await adminAuth.getUserByEmail(email);
+    await adminAuth.deleteUser(userRecord.uid);
     res.json({ ok: true });
   } catch (err) {
-    console.error('POST /api/state', err);
-    res.status(500).json({ error: 'Failed to save state' });
+    console.error('Delete user error:', err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
-// API: database size (for Admin panel)
-app.get('/api/state/size', (req, res) => {
+// Reset a user's password by email (admin resets staff password)
+app.post('/api/users/reset-password', async (req, res) => {
+  if (!adminRequired(res)) return;
   try {
-    const size = db.getDbSize();
-    res.json(size);
+    const { email, newPassword } = req.body;
+    const userRecord = await adminAuth.getUserByEmail(email);
+    await adminAuth.updateUser(userRecord.uid, { password: newPassword });
+    res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to get size' });
+    console.error('Reset password error:', err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
-// API: reset database to seed data (Format System)
+// Reset database to defaults (writes seed data to Firebase RTDB)
 app.post('/api/state/reset', async (req, res) => {
   try {
-    await db.resetDatabase();
+    const defaultState = {
+      users: DEFAULT_USERS,
+      deletedUsers: [],
+      locations: DEFAULT_LOCATIONS,
+      shifts: [],
+      templates: [],
+      requests: [],
+      notifications: [],
+    };
+
+    if (admin.apps.length > 0) {
+      await admin.database().ref('appState').set(JSON.stringify(defaultState));
+    } else {
+      // No Admin SDK — client must handle the reset via direct RTDB write
+      return res.status(503).json({ error: 'Admin SDK not configured for server-side reset.' });
+    }
     res.json({ ok: true });
   } catch (err) {
-    console.error('POST /api/state/reset', err);
-    res.status(500).json({ error: 'Failed to reset database' });
+    console.error('Reset error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// API: draft email notification (server-side Gemini; no @google/genai in browser)
+// Draft an email notification using Gemini (server-side only — API key stays off the browser)
 app.post('/api/draft-notification', async (req, res) => {
   try {
     const { recipientName, changeType, status } = req.body || {};
@@ -232,29 +197,18 @@ app.post('/api/draft-notification', async (req, res) => {
   }
 });
 
-// Serve static files from the 'dist' directory (explicit paths for Cloud Run)
+// Serve static files from the dist directory
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
-// Explicitly serve index.html at root and index.js so 404s are avoided on some hosts
-app.get('/', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
-app.get('/index.js', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.js'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+app.get('/index.js', (req, res) => res.sendFile(path.join(distPath, 'index.js')));
 
-// SPA fallback: any other GET (except API) returns index.html
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-db.init().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-  });
-}).catch(err => {
-  console.error('Database init failed:', err);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

@@ -1,6 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { User, Location, Role, Shift, ChangeRequest, AppState, Notification, RequestType, ScheduleTemplate } from '../types';
 import { Plus, Trash2, MapPin, UserPlus, FileUp, Download, AlertCircle, CheckCircle, Key, X, Info, Database, Save, UploadCloud, ShieldAlert, Cpu, CheckSquare, Search, RotateCcw, Calendar, History, ArrowRight, Clock } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { ref, set } from 'firebase/database';
+import { auth, database } from '../firebase';
+import { DEFAULT_USERS, DEFAULT_LOCATIONS, ALLOWED_DOMAINS } from '../App';
 
 interface AdminPanelProps {
   users: User[];
@@ -21,47 +25,41 @@ interface AdminPanelProps {
   currentUser: User;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ 
-    users, deletedUsers, locations, shifts, templates, requests, 
+const AdminPanel: React.FC<AdminPanelProps> = ({
+    users, deletedUsers, locations, shifts, templates, requests,
     notifications,
-    onAddUser, onRemoveUser, onRestoreUser, onAddLocation, onRemoveLocation, 
-    onImportUsers, onResetPassword, onRestoreState, currentUser 
+    onAddUser, onRemoveUser, onRestoreUser, onAddLocation, onRemoveLocation,
+    onImportUsers, onResetPassword, onRestoreState, currentUser
 }) => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocCalId, setNewLocCalId] = useState('');
   const [importStatus, setImportStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null);
-  const [storageSize, setStorageSize] = useState<string>('0 KB');
   const [formError, setFormError] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: Role.Technician, password: 'password123' });
   const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
-    fetch('/api/state/size')
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: { sizeLabel?: string }) => setStorageSize(data.sizeLabel || '—'))
-      .catch(() => setStorageSize('—'));
-  }, [users, locations, shifts, requests, notifications, deletedUsers]);
-
   const historicalRequests = useMemo(() => {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 160);
-      return requests
-          .filter(r => r.type === RequestType.TIME_OFF || r.type === RequestType.CALLED_OUT)
-          .filter(r => new Date(r.targetDate) >= cutoff)
-          .sort((a, b) => new Date(b.targetDate).getTime() - new Date(a.targetDate).getTime());
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 160);
+    return requests
+      .filter(r => r.type === RequestType.TIME_OFF || r.type === RequestType.CALLED_OUT)
+      .filter(r => new Date(r.targetDate) >= cutoff)
+      .sort((a, b) => new Date(b.targetDate).getTime() - new Date(a.targetDate).getTime());
   }, [requests]);
 
   const handleAddUser = (e: React.FormEvent) => {
-      e.preventDefault();
-      setFormError(null);
-      const cleanEmail = newUser.email.trim().toLowerCase();
-      if (!newUser.name.trim()) { setFormError("Missing Staff Name."); return; }
-      if (!cleanEmail || !cleanEmail.includes('@')) { setFormError("Missing or Invalid Email."); return; }
-      const exists = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
-      if (exists) { setFormError(`CONFLICT: User with email ${cleanEmail} already exists.`); return; }
-      onAddUser({ ...newUser, email: cleanEmail });
-      setNewUser({ name: '', email: '', role: Role.Technician, password: 'password123' });
-      setImportStatus({ type: 'success', msg: `COMMITTED added to registry.` });
+    e.preventDefault();
+    setFormError(null);
+    const cleanEmail = newUser.email.trim().toLowerCase();
+    if (!newUser.name.trim()) { setFormError('Missing Staff Name.'); return; }
+    if (!cleanEmail || !cleanEmail.includes('@')) { setFormError('Missing or Invalid Email.'); return; }
+    const domain = cleanEmail.split('@')[1];
+    if (!ALLOWED_DOMAINS.includes(domain)) { setFormError(`Email must be on a corporate domain: ${ALLOWED_DOMAINS.map(d => '@' + d).join(', ')}`); return; }
+    const exists = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
+    if (exists) { setFormError(`CONFLICT: User with email ${cleanEmail} already exists.`); return; }
+    onAddUser({ ...newUser, email: cleanEmail });
+    setNewUser({ name: '', email: '', role: Role.Technician, password: 'password123' });
+    setImportStatus({ type: 'success', msg: 'COMMITTED: added to registry.' });
   };
 
   const handleExportFullData = () => {
@@ -80,21 +78,43 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-        try {
-            const imported = JSON.parse(e.target?.result as string);
-            if (imported.users && Array.isArray(imported.users)) {
-                onRestoreState(imported);
-                setImportStatus({ type: 'success', msg: 'Full Database Restore Completed.' });
-            } else {
-                setImportStatus({ type: 'error', msg: 'Invalid backup format.' });
-            }
-        } catch (err) { alert("Format Error."); }
+      try {
+        const imported = JSON.parse(e.target?.result as string);
+        if (imported.users && Array.isArray(imported.users)) {
+          onRestoreState(imported);
+          setImportStatus({ type: 'success', msg: 'Full Database Restore Completed.' });
+        } else {
+          setImportStatus({ type: 'error', msg: 'Invalid backup format.' });
+        }
+      } catch { alert('Format Error.'); }
     };
     reader.readAsText(file);
   };
 
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const handleFormatSystem = async () => {
+    if (!confirm('FINAL WARNING? This will reset the Firebase database to default users and clear all data.')) return;
+
+    const defaultState = {
+      users: DEFAULT_USERS.map(({ password: _p, ...u }) => u),
+      deletedUsers: [],
+      locations: DEFAULT_LOCATIONS,
+      shifts: [],
+      templates: [],
+      requests: [],
+      notifications: [],
+    };
+
+    try {
+      await set(ref(database, 'appState'), JSON.stringify(defaultState));
+      await signOut(auth);
+      window.location.reload();
+    } catch (err) {
+      alert('Reset failed. Please try again.');
+    }
+  };
+
+  const filteredUsers = users.filter(u =>
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -103,8 +123,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800">Verified System Administration</h2>
         <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100 text-[10px] font-bold shadow-sm">
-                <CheckCircle size={14} /> SQLite ({storageSize})
+            <div className="flex items-center gap-2 bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full border border-orange-100 text-[10px] font-bold shadow-sm">
+                <CheckCircle size={14} /> Firebase RTDB
             </div>
         </div>
       </div>
@@ -115,8 +135,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               <form onSubmit={handleAddUser} className="space-y-4 mb-6">
                   <input type="text" placeholder="Full Name" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.name} onChange={(e) => setNewUser({...newUser, name: e.target.value})} />
                   <input type="email" placeholder="Staff Email" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.email} onChange={(e) => setNewUser({...newUser, email: e.target.value})} />
+                  <input type="password" placeholder="Initial Password" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} />
                   <select className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value as Role})}>{Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}</select>
                   {formError && <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded flex items-center gap-2"><AlertCircle size={14}/> {formError}</div>}
+                  {importStatus && <div className={`p-2.5 border text-xs font-bold rounded flex items-center gap-2 ${importStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}><CheckCircle size={14}/> {importStatus.msg}</div>}
                   <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-lg text-sm font-bold shadow-md transition-all active:scale-[0.98]">Create User</button>
               </form>
               <div className="border-t border-slate-100 pt-6 mt-6">
@@ -180,9 +202,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                 </table>
               </div>
           </div>
+
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
-              <div className="flex justify-between items-start mb-6"><div><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Database className="text-indigo-500" size={20}/> System Persistence</h3><p className="text-xs text-slate-500 mt-1">State and backup recovery.</p></div><div className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-mono tracking-tighter border border-blue-500/30">v2.8_CALLOUTS</div></div>
-              <div className="flex flex-wrap gap-4"><button onClick={handleExportFullData} className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-bold shadow-lg transition-transform active:scale-95"><Save size={18} /> Export Full Backup</button><label className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-sm font-bold cursor-pointer transition-transform active:scale-95"><UploadCloud size={18} /> Import Database<input type="file" accept=".json" onChange={handleImportFullData} className="hidden" /></label><button onClick={() => { if(confirm("FINAL WARNING? This will reset the SQLite database to default users and clear all data.")) { fetch('/api/state/reset', { method: 'POST' }).then(() => { fetch('/api/auth/logout', { method: 'POST' }).then(() => { window.location.reload(); }).catch(() => alert('Reset failed.')); }).catch(() => alert('Reset failed.')); } }} className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold ml-auto transition-colors"><ShieldAlert size={18} /> Format System</button></div>
+              <div className="flex justify-between items-start mb-6"><div><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Database className="text-indigo-500" size={20}/> System Persistence</h3><p className="text-xs text-slate-500 mt-1">State and backup recovery — powered by Firebase Realtime Database.</p></div><div className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-mono tracking-tighter border border-orange-500/30">v3.0_FIREBASE</div></div>
+              <div className="flex flex-wrap gap-4">
+                <button onClick={handleExportFullData} className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-bold shadow-lg transition-transform active:scale-95"><Save size={18} /> Export Full Backup</button>
+                <label className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-sm font-bold cursor-pointer transition-transform active:scale-95"><UploadCloud size={18} /> Import Database<input type="file" accept=".json" onChange={handleImportFullData} className="hidden" /></label>
+                <button onClick={handleFormatSystem} className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold ml-auto transition-colors"><ShieldAlert size={18} /> Format System</button>
+              </div>
           </div>
       </div>
     </div>
