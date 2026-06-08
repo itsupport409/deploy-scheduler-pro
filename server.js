@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3003;
 app.use(express.json({ limit: '10mb' }));
 
 // Firebase Admin SDK — credentials resolved in priority order:
-//   1. FIREBASE_SERVICE_ACCOUNT env var (JSON string)
+//   1. FIREBASE_SERVICE_ACCOUNT2 env var (JSON string)
 //   2. GOOGLE_APPLICATION_CREDENTIALS env var (path to key file)
 //   3. Any *-firebase-adminsdk-*.json file in the project directory
 // User management endpoints return 503 if admin is not configured.
@@ -23,8 +23,8 @@ function findLocalServiceAccountFile() {
 }
 
 try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  if (process.env.FIREBASE_SERVICE_ACCOUNT2) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT2);
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
       databaseURL: 'https://firebase-db-project-496801-default-rtdb.firebaseio.com'
@@ -43,7 +43,7 @@ try {
       });
       console.log(`Firebase Admin: loaded credentials from ${path.basename(localKeyFile)}`);
     } else {
-      console.warn('Firebase Admin: no credentials found — user management endpoints will return 503. Set FIREBASE_SERVICE_ACCOUNT to enable them.');
+      console.warn('Firebase Admin: no credentials found — user management endpoints will return 503. Set FIREBASE_SERVICE_ACCOUNT2 to enable them.');
     }
   }
   if (admin.apps.length > 0) {
@@ -72,7 +72,7 @@ const DEFAULT_USERS = [
 
 function adminRequired(res) {
   if (!adminAuth) {
-    res.status(503).json({ error: 'Firebase Admin SDK not configured. Set the FIREBASE_SERVICE_ACCOUNT environment variable.' });
+    res.status(503).json({ error: 'Firebase Admin SDK not configured. Set the FIREBASE_SERVICE_ACCOUNT2 environment variable.' });
     return false;
   }
   return true;

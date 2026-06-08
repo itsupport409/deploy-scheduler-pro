@@ -18,7 +18,7 @@ ENV NODE_ENV=production
 ENV PORT=3003
 # Firebase Admin SDK credentials (JSON string of service account key)
 # Set this in Cloud Run environment variables — do NOT hardcode here
-# ENV FIREBASE_SERVICE_ACCOUNT={}
+# ENV FIREBASE_SERVICE_ACCOUNT2={}
 
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
