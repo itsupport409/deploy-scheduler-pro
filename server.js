@@ -10,7 +10,8 @@ app.use(express.json({ limit: '10mb' }));
 //   1. FIREBASE_SERVICE_ACCOUNT2 env var (JSON string)
 //   2. GOOGLE_APPLICATION_CREDENTIALS env var (path to key file)
 //   3. Any *-firebase-adminsdk-*.json file in the project directory
-// User management endpoints return 503 if admin is not configured.
+// If none are available, user creation falls back to the Identity Toolkit
+// REST API (web API key only); other admin endpoints return 503.
 const fs = require('fs');
 const admin = require('firebase-admin');
 let adminAuth = null;
@@ -78,10 +79,49 @@ function adminRequired(res) {
   return true;
 }
 
+// Web API key — same public key the browser uses (see firebase.ts); not a secret.
+// Lets the server create accounts via the Identity Toolkit REST API when the
+// Admin SDK has no service account credentials (e.g. on Cloud Run).
+const FIREBASE_WEB_API_KEY = 'AIzaSyAxZIXZ9Y4mLq7fSHwexUyG5YIV5z6aTyc';
+const IDENTITY_TOOLKIT_URL = 'https://identitytoolkit.googleapis.com/v1';
+
+async function createUserViaRestApi(email, password, displayName) {
+  const signUpRes = await fetch(`${IDENTITY_TOOLKIT_URL}/accounts:signUp?key=${FIREBASE_WEB_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true })
+  });
+  const data = await signUpRes.json();
+  if (!signUpRes.ok) {
+    const code = data?.error?.message || 'unknown error';
+    if (code.startsWith('EMAIL_EXISTS')) throw new Error('auth/email-already-exists');
+    if (code.startsWith('WEAK_PASSWORD') || code.startsWith('PASSWORD_SHOULD_BE')) throw new Error('Password must be at least 6 characters.');
+    if (code.startsWith('INVALID_EMAIL')) throw new Error('Invalid email address.');
+    throw new Error(`Account creation failed: ${code}`);
+  }
+  if (displayName) {
+    // Best-effort: a missing display name shouldn't fail the whole creation
+    await fetch(`${IDENTITY_TOOLKIT_URL}/accounts:update?key=${FIREBASE_WEB_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: data.idToken, displayName, returnSecureToken: false })
+    }).catch(err => console.warn('Set displayName failed:', err.message));
+  }
+  return data.localId;
+}
+
 // Create a Firebase Auth user (admin adds staff)
 app.post('/api/users/create', async (req, res) => {
-  if (!adminRequired(res)) return;
   const { email, password, displayName } = req.body;
+  if (!adminAuth) {
+    try {
+      const uid = await createUserViaRestApi(email, password, displayName);
+      return res.json({ ok: true, uid });
+    } catch (err) {
+      console.error('Create user (REST) error:', err.message);
+      return res.status(400).json({ error: err.message });
+    }
+  }
   // Retry once — first call can fail while OAuth token warms up
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
