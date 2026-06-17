@@ -267,7 +267,7 @@ const App: React.FC = () => {
       const res = await fetch('/api/users/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: user.password || 'password123', displayName: user.name || 'Staff Member' })
+        body: JSON.stringify({ email, password: user.password, displayName: user.name || 'Staff Member' })
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -369,7 +369,7 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-slate-50 flex">
         <Sidebar currentView={currentView} onChangeView={setCurrentView} currentUserRole={state.currentUser.role} />
         <div className="ml-64 flex-1 flex flex-col">
-          <Header currentUser={state.currentUser} onLogout={handleLogout} onChangePassword={handleUpdatePassword} isSaving={isSaving} lastSaved={lastSaved} />
+          <Header currentUser={state.currentUser} onLogout={handleLogout} onChangePassword={handleUpdatePassword} notifications={state.notifications} isSaving={isSaving} lastSaved={lastSaved} />
           <main className="flex-1 mt-16">{renderContent()}</main>
         </div>
       </div>

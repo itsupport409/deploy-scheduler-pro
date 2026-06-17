@@ -35,7 +35,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newLocCalId, setNewLocCalId] = useState('');
   const [importStatus, setImportStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [newUser, setNewUser] = useState({ name: '', email: '', role: Role.Technician, password: 'password123' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', role: Role.Technician, password: '' });
   const [searchTerm, setSearchTerm] = useState('');
 
   const historicalRequests = useMemo(() => {
@@ -57,8 +57,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     if (!ALLOWED_DOMAINS.includes(domain)) { setFormError(`Email must be on a corporate domain: ${ALLOWED_DOMAINS.map(d => '@' + d).join(', ')}`); return; }
     const exists = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
     if (exists) { setFormError(`CONFLICT: User with email ${cleanEmail} already exists.`); return; }
+    if (!newUser.password || newUser.password.length < 6) { setFormError('Initial Password is required (min 6 characters).'); return; }
     onAddUser({ ...newUser, email: cleanEmail });
-    setNewUser({ name: '', email: '', role: Role.Technician, password: 'password123' });
+    setNewUser({ name: '', email: '', role: Role.Technician, password: '' });
     setImportStatus({ type: 'success', msg: 'COMMITTED: added to registry.' });
   };
 
@@ -118,6 +119,24 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleAddLocation = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newLocName.trim();
+    if (!name) return;
+    const calId = newLocCalId.trim() || name.replace(/\s+/g, '_').toLowerCase() + '@group.calendar.google.com';
+    onAddLocation(name, calId);
+    setNewLocName('');
+    setNewLocCalId('');
+  };
+
+  const handleRemoveLocation = (loc: Location) => {
+    const assignedShifts = shifts.filter(s => s.locationId === loc.id).length;
+    const warning = assignedShifts > 0
+      ? `\n\nWARNING: ${assignedShifts} shift(s) are assigned to this location and will be orphaned.`
+      : '';
+    if (confirm(`Delete location "${loc.name}"?${warning}`)) onRemoveLocation(loc.id);
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
@@ -135,7 +154,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               <form onSubmit={handleAddUser} className="space-y-4 mb-6">
                   <input type="text" placeholder="Full Name" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.name} onChange={(e) => setNewUser({...newUser, name: e.target.value})} />
                   <input type="email" placeholder="Staff Email" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.email} onChange={(e) => setNewUser({...newUser, email: e.target.value})} />
-                  <input type="password" placeholder="Initial Password" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} />
+                  <input type="password" required placeholder="Initial Password (min 6 chars, required)" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} />
                   <select className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value as Role})}>{Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}</select>
                   {formError && <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded flex items-center gap-2"><AlertCircle size={14}/> {formError}</div>}
                   {importStatus && <div className={`p-2.5 border text-xs font-bold rounded flex items-center gap-2 ${importStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}><CheckCircle size={14}/> {importStatus.msg}</div>}
@@ -157,6 +176,36 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="max-h-96 overflow-y-auto space-y-1 pr-1 custom-scrollbar">{filteredUsers.slice().reverse().map(u => (
                       <div key={u.id} className="flex justify-between items-center p-3 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all"><div className="min-w-0"><span className="font-bold text-slate-800 block">{u.name}</span><span className="text-slate-400 text-[10px] block">{u.email} • {u.role}</span></div><button onClick={() => { if(confirm(`Archive ${u.name}?`)) onRemoveUser(u.id); }} className="text-red-400 p-2 hover:bg-red-50 rounded-full transition-colors ml-2"><Trash2 size={16}/></button></div>
                   ))}</div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><MapPin className="text-rose-500" size={20}/> Location Management</h3>
+                <span className="text-[10px] font-bold bg-rose-50 text-rose-600 px-2 py-1 rounded-full">LOCATIONS: {locations.length}</span>
+              </div>
+              <form onSubmit={handleAddLocation} className="flex flex-col sm:flex-row gap-3 mb-6">
+                  <input type="text" placeholder="Location name (e.g. North Branch)" className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-400" value={newLocName} onChange={(e) => setNewLocName(e.target.value)} />
+                  <input type="text" placeholder="Calendar ID (optional)" className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-400" value={newLocCalId} onChange={(e) => setNewLocCalId(e.target.value)} />
+                  <button type="submit" className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md transition-all active:scale-95"><Plus size={16}/> Add Location</button>
+              </form>
+              <div className="space-y-2">
+                  {locations.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-4 text-center border-2 border-dashed border-slate-100 rounded-xl">No locations configured.</p>
+                  ) : (
+                    locations.map(loc => (
+                      <div key={loc.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:border-slate-300 transition-all">
+                          <div className="min-w-0 flex items-center gap-3">
+                              <div className="p-2 bg-white border border-slate-200 text-rose-500 rounded-lg shadow-sm shrink-0"><MapPin size={16}/></div>
+                              <div className="min-w-0">
+                                  <span className="font-bold text-slate-800 block truncate">{loc.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono block truncate">{loc.calendarId}</span>
+                              </div>
+                          </div>
+                          <button onClick={() => handleRemoveLocation(loc)} className="text-red-400 p-2 hover:bg-red-50 rounded-full transition-colors ml-2 shrink-0" title={`Delete ${loc.name}`}><Trash2 size={16}/></button>
+                      </div>
+                    ))
+                  )}
+              </div>
           </div>
 
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">

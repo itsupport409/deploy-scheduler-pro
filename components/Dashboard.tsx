@@ -76,8 +76,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
             />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-2">
@@ -96,8 +95,8 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
                             </div>
                         </div>
                     </div>
-                    
-                    <div className="space-y-4 max-h-[440px] overflow-y-auto pr-2 custom-scrollbar">
+
+                    <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                         {displayNotifications.length === 0 ? (
                             <div className="py-12 text-center text-slate-400 text-sm italic border-2 border-dashed border-slate-100 rounded-xl">
                                 No recent system activity logged.
@@ -149,67 +148,12 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
                     </div>
                     <Database className="absolute -right-8 -bottom-8 text-white/5" size={200} />
                 </div>
-            </div>
-
-            <div className="lg:col-span-1">
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 sticky top-24">
-                    <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <Zap size={18} className="text-amber-500" />
-                        Quick Actions
-                    </h3>
-                    <div className="space-y-3">
-                        <button className="w-full text-left p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-100 hover:border-slate-200 transition-all flex items-center justify-between group">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white rounded-lg shadow-sm text-slate-400 group-hover:text-blue-500 transition-colors">
-                                    <Calendar size={18} />
-                                </div>
-                                <span className="text-sm font-bold text-slate-700">Sync Master Calendar</span>
-                            </div>
-                            <ArrowRight size={14} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
-                        </button>
-                        
-                        <button className="w-full text-left p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-100 hover:border-slate-200 transition-all flex items-center justify-between group">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white rounded-lg shadow-sm text-slate-400 group-hover:text-amber-500 transition-colors">
-                                    <Clock size={18} />
-                                </div>
-                                <span className="text-sm font-bold text-slate-700">Request Time Off</span>
-                            </div>
-                            <ArrowRight size={14} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
-                        </button>
-
-                        <button className="w-full text-left p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-100 hover:border-slate-200 transition-all flex items-center justify-between group">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white rounded-lg shadow-sm text-slate-400 group-hover:text-indigo-500 transition-colors">
-                                    <Users size={18} />
-                                </div>
-                                <span className="text-sm font-bold text-slate-700">View Team Directory</span>
-                            </div>
-                            <ArrowRight size={14} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
-                        </button>
-                    </div>
-
-                    <div className="mt-8 p-4 bg-blue-50 border border-blue-100 rounded-xl">
-                        <h4 className="text-[10px] font-black uppercase text-blue-600 tracking-widest mb-2">Shift Insights</h4>
-                        <p className="text-[11px] text-blue-800/70 leading-relaxed font-medium">
-                            Based on your history, staffing levels are optimal for the current week. 
-                            <span className="block mt-1 font-bold">No coverage gaps detected.</span>
-                        </p>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
   );
 };
 
 // Internal icon helpers for cleaner code
-const Zap = ({ size, className }: { size: number, className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-);
-const ArrowRight = ({ size, className }: { size: number, className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-);
 const Database = ({ size, className }: { size: number, className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
 );

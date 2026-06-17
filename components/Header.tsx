@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { User as UserType } from '../types';
-import { Bell, LogOut, Key, X, Lock, CheckCircle, RefreshCcw } from 'lucide-react';
+import { User as UserType, Notification } from '../types';
+import { Bell, LogOut, Key, X, Lock, CheckCircle, RefreshCcw, Clock } from 'lucide-react';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { auth } from '../firebase';
 
@@ -8,14 +8,18 @@ interface HeaderProps {
   currentUser: UserType;
   onLogout: () => void;
   onChangePassword?: (userId: string, newPassword: string) => void;
+  notifications?: Notification[];
   isSaving?: boolean;
   lastSaved?: number;
 }
 
-const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, isSaving, lastSaved }) => {
+const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, notifications = [], isSaving, lastSaved }) => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [error, setError] = useState('');
+
+  const recentNotifications = notifications.slice(0, 6);
 
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,10 +106,46 @@ const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, isSaving, lastSa
 
       <div className="flex items-center gap-4">
         <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors" title="Security Settings" onClick={() => setShowPasswordModal(true)}><Key size={20} /></button>
-        <button className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors">
-            <Bell size={20} />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-        </button>
+        <div className="relative">
+            <button
+                className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+                title="Recent system notifications"
+                onClick={() => setShowNotifications(s => !s)}
+            >
+                <Bell size={20} />
+                {recentNotifications.length > 0 && (
+                    <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+                )}
+            </button>
+
+            {showNotifications && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)} />
+                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+                            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Bell size={14} className="text-blue-500" /> Recent System Notifications</h4>
+                            <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200 uppercase">{notifications.length}</span>
+                        </div>
+                        <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                            {recentNotifications.length === 0 ? (
+                                <p className="px-4 py-8 text-center text-xs text-slate-400 italic">No recent system activity logged.</p>
+                            ) : (
+                                recentNotifications.map(n => (
+                                    <div key={n.id} className="px-4 py-3 hover:bg-slate-50 transition-colors">
+                                        <div className="flex justify-between items-start gap-2 mb-1">
+                                            <h5 className="text-xs font-bold text-slate-800 truncate">{n.subject}</h5>
+                                            <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap flex items-center gap-1"><Clock size={9} /> {new Date(n.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                        </div>
+                                        <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">{n.content}</p>
+                                        <span className="text-[9px] text-slate-400 font-medium mt-1 block">{n.userName}</span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
         <div className="pl-4 border-l border-slate-200">
             <button onClick={onLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-red-600 transition-colors"><LogOut size={18} />Sign Out</button>
         </div>
