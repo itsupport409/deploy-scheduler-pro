@@ -33,6 +33,11 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
     setPolicyWarning(null);
     setFormError(null);
 
+    // Pay Type only applies to Time Off and Called Out — clear it otherwise
+    if (newRequestType !== RequestType.TIME_OFF && newRequestType !== RequestType.CALLED_OUT) {
+      setPayType('');
+    }
+
     if (newRequestType === RequestType.TIME_OFF && newRequestDate) {
         const target = new Date(newRequestDate);
         const today = new Date();
@@ -94,8 +99,8 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
         return;
     }
 
-    if (newRequestType === RequestType.TIME_OFF && !payType) {
-        setFormError("Required: You must select either Paid or Unpaid time off.");
+    if ((newRequestType === RequestType.TIME_OFF || newRequestType === RequestType.CALLED_OUT) && !payType) {
+        setFormError("Required: You must select either Paid or Unpaid.");
         return;
     }
 
@@ -150,33 +155,33 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
                     </select>
                 </div>
 
-                {newRequestType === RequestType.TIME_OFF && (
+                {(newRequestType === RequestType.TIME_OFF || newRequestType === RequestType.CALLED_OUT) && (
                     <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
                         <p className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1">
                            <DollarSign size={12} /> Pay Type (Required)
                         </p>
                         <div className="space-y-3">
-                            <button 
+                            <button
                                 type="button"
                                 onClick={() => setPayType('Paid')}
                                 className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${payType === 'Paid' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300'}`}
                             >
                                 {payType === 'Paid' ? <CheckSquare size={18} /> : <Square size={18} />}
                                 <div className="flex flex-col">
-                                    <span className="text-sm font-bold">Paid Time Off</span>
+                                    <span className="text-sm font-bold">{newRequestType === RequestType.CALLED_OUT ? 'Paid Call-Out' : 'Paid Time Off'}</span>
                                     <span className={`text-[10px] ${payType === 'Paid' ? 'text-blue-100' : 'text-slate-400'} italic`}>if applicable</span>
                                 </div>
                             </button>
-                            
-                            <button 
+
+                            <button
                                 type="button"
                                 onClick={() => setPayType('Unpaid')}
                                 className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${payType === 'Unpaid' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300'}`}
                             >
                                 {payType === 'Unpaid' ? <CheckSquare size={18} /> : <Square size={18} />}
                                 <div className="flex flex-col">
-                                    <span className="text-sm font-bold">Unpaid Time Off</span>
-                                    <span className={`text-[10px] ${payType === 'Unpaid' ? 'text-blue-100' : 'text-slate-400'}`}>Standard Leave</span>
+                                    <span className="text-sm font-bold">{newRequestType === RequestType.CALLED_OUT ? 'Unpaid Call-Out' : 'Unpaid Time Off'}</span>
+                                    <span className={`text-[10px] ${payType === 'Unpaid' ? 'text-blue-100' : 'text-slate-400'}`}>{newRequestType === RequestType.CALLED_OUT ? 'No pay for absence' : 'Standard Leave'}</span>
                                 </div>
                             </button>
                         </div>

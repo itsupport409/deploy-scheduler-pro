@@ -1,5 +1,6 @@
 import React from 'react';
 import { User, Shift, ChangeRequest, RequestStatus, Notification } from '../types';
+import { buildAlerts, formatAlertTime } from '../alerts';
 import { Users, Calendar, AlertTriangle, Briefcase, Mail, CheckCircle2, Clock, Info } from 'lucide-react';
 
 interface DashboardProps {
@@ -40,8 +41,9 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
 
   const totalRegisteredStaff = users.length;
 
-  // Limit to 10 most recent notifications for the dashboard view
-  const displayNotifications = notifications.slice(0, 10);
+  // Merge sent notifications with pending requests, newest first, top 10
+  const alerts = buildAlerts(notifications, requests, users);
+  const displayNotifications = alerts.slice(0, 10);
 
   return (
     <div className="p-6 space-y-6">
@@ -85,7 +87,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
                         </div>
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full uppercase tracking-tight">
-                                Top 10 of {notifications.length}
+                                Top 10 of {alerts.length}
                             </span>
                             <div className="group relative">
                                 <Info size={14} className="text-slate-300 cursor-help" />
@@ -105,15 +107,15 @@ const Dashboard: React.FC<DashboardProps> = ({ users, shifts, requests, notifica
                             displayNotifications.map(n => (
                                 <div key={n.id} className="p-4 rounded-lg bg-slate-50 border border-slate-100 flex gap-4 hover:border-slate-300 transition-all">
                                     <div className="shrink-0 mt-1">
-                                        <div className="p-2 bg-white border border-slate-200 text-emerald-600 rounded-lg shadow-sm">
-                                            <CheckCircle2 size={16} />
+                                        <div className={`p-2 bg-white border border-slate-200 rounded-lg shadow-sm ${n.kind === 'request' ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                            {n.kind === 'request' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
                                         </div>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex justify-between items-start mb-1">
                                             <h4 className="text-sm font-bold text-slate-900 truncate">{n.subject}</h4>
                                             <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap ml-2 flex items-center gap-1 bg-white px-2 py-0.5 rounded-full border border-slate-100">
-                                                <Clock size={10} /> {new Date(n.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                <Clock size={10} /> {formatAlertTime(n.sentAt)}
                                             </span>
                                         </div>
                                         <p className="text-xs text-slate-600 line-clamp-2 mb-2 leading-relaxed font-medium">

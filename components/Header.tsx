@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { User as UserType, Notification } from '../types';
-import { Bell, LogOut, Key, X, Lock, CheckCircle, RefreshCcw, Clock } from 'lucide-react';
+import { User as UserType, Notification, ChangeRequest } from '../types';
+import { buildAlerts, formatAlertTime } from '../alerts';
+import { Bell, LogOut, Key, X, Lock, CheckCircle, RefreshCcw, Clock, AlertTriangle } from 'lucide-react';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { auth } from '../firebase';
 
@@ -9,17 +10,19 @@ interface HeaderProps {
   onLogout: () => void;
   onChangePassword?: (userId: string, newPassword: string) => void;
   notifications?: Notification[];
+  requests?: ChangeRequest[];
+  users?: UserType[];
   isSaving?: boolean;
   lastSaved?: number;
 }
 
-const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, notifications = [], isSaving, lastSaved }) => {
+const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, notifications = [], requests = [], users = [], isSaving, lastSaved }) => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [error, setError] = useState('');
 
-  const recentNotifications = notifications.slice(0, 6);
+  const recentNotifications = buildAlerts(notifications, requests, users).slice(0, 6);
 
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +127,7 @@ const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, notifications = 
                     <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden">
                         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
                             <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Bell size={14} className="text-blue-500" /> Recent System Notifications</h4>
-                            <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200 uppercase">{notifications.length}</span>
+                            <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200 uppercase">{recentNotifications.length}</span>
                         </div>
                         <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
                             {recentNotifications.length === 0 ? (
@@ -133,8 +136,11 @@ const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, notifications = 
                                 recentNotifications.map(n => (
                                     <div key={n.id} className="px-4 py-3 hover:bg-slate-50 transition-colors">
                                         <div className="flex justify-between items-start gap-2 mb-1">
-                                            <h5 className="text-xs font-bold text-slate-800 truncate">{n.subject}</h5>
-                                            <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap flex items-center gap-1"><Clock size={9} /> {new Date(n.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            <h5 className={`text-xs font-bold truncate flex items-center gap-1.5 ${n.kind === 'request' ? 'text-amber-700' : 'text-slate-800'}`}>
+                                                {n.kind === 'request' && <AlertTriangle size={11} className="text-amber-500 shrink-0" />}
+                                                {n.subject}
+                                            </h5>
+                                            <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap flex items-center gap-1"><Clock size={9} /> {formatAlertTime(n.sentAt)}</span>
                                         </div>
                                         <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">{n.content}</p>
                                         <span className="text-[9px] text-slate-400 font-medium mt-1 block">{n.userName}</span>
