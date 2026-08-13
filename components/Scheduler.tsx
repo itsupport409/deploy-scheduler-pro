@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Shift, User, Location, Role, ScheduleTemplate, TemplateShift, ChangeRequest, RequestStatus, RequestType } from '../types';
-import { Calendar as CalendarIcon, MapPin, Plus, Lock, Printer, Share2, Clock, X, Trash2, Check, LayoutGrid, Save, ChevronDown, Sun, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, MapPin, Plus, Lock, Download, Clock, X, Trash2, Check, LayoutGrid, Save, ChevronDown, Sun, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface SchedulerProps {
   shifts: Shift[];
@@ -101,10 +101,6 @@ const Scheduler: React.FC<SchedulerProps> = ({
     return `${weekDays[0].toLocaleDateString('en-US', options)} – ${weekDays[6].toLocaleDateString('en-US', endOptions)}`;
   };
 
-  const handlePrint = () => {
-      window.print();
-  };
-
   const formatTimeDisplay = (iso: string) => {
       return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
@@ -115,33 +111,51 @@ const Scheduler: React.FC<SchedulerProps> = ({
     return Math.abs(e.getTime() - s.getTime()) / 36e5;
   };
 
-  const handleCopyForSlack = () => {
-      const locationName = locations.find(l => l.id === selectedLocation)?.name || 'Unknown Location';
-      let summary = `📅 *Schedule for ${locationName}*\n_Week of ${weekStart.toLocaleDateString()}_\n`;
-      
-      weekDays.forEach(day => {
-        summary += `\n*${day.toLocaleDateString('en-US', { weekday: 'long', month: 'numeric', day: 'numeric' })}*\n`;
-        const dayShifts = shifts.filter(s => {
-             const sDate = new Date(s.start);
-             return s.locationId === selectedLocation && sDate.toDateString() === day.toDateString();
-        });
-        
-        if (dayShifts.length === 0) {
-            summary += "_No shifts scheduled_\n";
-        } else {
-            dayShifts.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-            dayShifts.forEach(s => {
-                const u = users.find(u => u.id === s.userId);
-                summary += `• ${u?.name} (${u?.role}): ${formatTimeDisplay(s.start)} - ${formatTimeDisplay(s.end)}\n`;
-            });
-        }
+  // Wrap a value for safe CSV output (quote and escape embedded quotes/commas/newlines)
+  const csvCell = (value: string | number) => {
+    const s = String(value ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const handleExportScheduleCSV = () => {
+    const locationName = locations.find(l => l.id === selectedLocation)?.name || 'Unknown Location';
+
+    // Collect every shift for the selected location within the viewed week
+    const weekShifts = shifts
+      .filter(s => {
+        const sDate = new Date(s.start);
+        return s.locationId === selectedLocation && sDate >= weekStart && sDate <= weekEnd;
+      })
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+    const header = ['Employee', 'Role', 'Day', 'Date', 'Shift', 'Start', 'End', 'Hours'];
+    const rows = weekShifts.map(s => {
+      const u = users.find(u => u.id === s.userId);
+      const d = new Date(s.start);
+      return [
+        u?.name || 'Unknown',
+        u?.role || '',
+        d.toLocaleDateString('en-US', { weekday: 'long' }),
+        d.toLocaleDateString(),
+        s.title,
+        formatTimeDisplay(s.start),
+        formatTimeDisplay(s.end),
+        calculateShiftHours(s.start, s.end).toFixed(2),
+      ];
     });
 
-    navigator.clipboard.writeText(summary).then(() => {
-        alert("Schedule copied to clipboard!");
-    }).catch(err => {
-        console.error('Failed to copy text: ', err);
-    });
+    const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeName = locationName.replace(/\s+/g, '_').toLowerCase();
+    const dateStamp = weekStart.toISOString().split('T')[0];
+    link.href = url;
+    link.download = `schedule_${safeName}_${dateStamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const isManager = currentUser.role === Role.GM || currentUser.role === Role.BOM || currentUser.role === Role.ADMIN;
@@ -419,8 +433,7 @@ const Scheduler: React.FC<SchedulerProps> = ({
                         )}
                     </div>
                     <div className="flex items-center gap-1 border-l pl-3 border-slate-300 ml-1">
-                        <button onClick={handlePrint} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"><Printer size={20} /></button>
-                        <button onClick={handleCopyForSlack} className="p-2 text-slate-600 hover:bg-slate-100 hover:text-indigo-600 rounded-lg transition-colors"><Share2 size={20} /></button>
+                        <button onClick={handleExportScheduleCSV} className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-indigo-600 rounded-lg transition-colors text-sm font-bold" title="Export this week's schedule to CSV"><Download size={18} /> Export CSV</button>
                     </div>
                 </div>
             )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChangeRequest, RequestStatus, Role, User, RequestType, Notification } from '../types';
-import { Check, X, Clock, Calendar, Timer, Mail, Loader2, Send, Lock as LockIcon, AlertCircle, Info, DollarSign, Square, CheckSquare, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Check, X, Clock, Calendar, Timer, Mail, Loader2, Send, Lock as LockIcon, AlertCircle, Info, DollarSign, Square, CheckSquare, AlertTriangle, ArrowRight, Users } from 'lucide-react';
 
 interface RequestsProps {
   requests: ChangeRequest[];
@@ -23,11 +23,16 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [policyWarning, setPolicyWarning] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  // Administrators and General Managers can file a request for a specific staff member.
+  const [onBehalfOfId, setOnBehalfOfId] = useState<string>(currentUser.id);
 
-  const isApprover = 
-    currentUser.role === Role.ADMIN || 
-    currentUser.role === Role.GM || 
+  const isApprover =
+    currentUser.role === Role.ADMIN ||
+    currentUser.role === Role.GM ||
     currentUser.role === Role.BOM;
+
+  // Only Administrators and General Managers may submit on behalf of another staff member.
+  const canSubmitForOthers = currentUser.role === Role.ADMIN || currentUser.role === Role.GM;
 
   useEffect(() => {
     setPolicyWarning(null);
@@ -104,6 +109,9 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
         return;
     }
 
+    // Managers may file on behalf of a selected employee; everyone else files for themselves.
+    const requesterId = canSubmitForOthers ? onBehalfOfId : currentUser.id;
+
     onRequestCreate({
         type: newRequestType,
         targetDate: new Date(newRequestDate).toISOString(),
@@ -113,9 +121,9 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
         timeBlock: timeBlock || undefined,
         payType: payType as any,
         details: newRequestDetails,
-        requesterId: currentUser.id
+        requesterId
     });
-    
+
     // Reset Form
     setNewRequestDetails('');
     setNewRequestDate('');
@@ -124,9 +132,13 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
     setNewOutTime('');
     setTimeBlock('');
     setPayType('');
+    setOnBehalfOfId(currentUser.id);
     setFormError(null);
     setPolicyWarning(null);
-    alert("Request logged to database for review.");
+    const requesterName = users.find(u => u.id === requesterId)?.name || 'the selected staff member';
+    alert(canSubmitForOthers && requesterId !== currentUser.id
+        ? `Request logged on behalf of ${requesterName} for review.`
+        : "Request logged to database for review.");
   };
 
   return (
@@ -148,10 +160,31 @@ const Requests: React.FC<RequestsProps> = ({ requests, users, currentUser, onUpd
                     </div>
                 )}
 
+                {canSubmitForOthers && (
+                    <div className="p-4 bg-indigo-50 rounded-lg border border-indigo-200 space-y-2">
+                        <label className="text-xs font-bold text-indigo-700 uppercase tracking-widest flex items-center gap-1">
+                            <Users size={12} /> Submit on Behalf of Staff
+                        </label>
+                        <select
+                            className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                            value={onBehalfOfId}
+                            onChange={(e) => setOnBehalfOfId(e.target.value)}
+                        >
+                            {/* Individual employees only — no aggregate "All Employees" option. */}
+                            <option value={currentUser.id}>Myself ({currentUser.name})</option>
+                            {users.filter(u => u.id !== currentUser.id).map(u => (
+                                <option key={u.id} value={u.id}>{u.name} — {u.role}</option>
+                            ))}
+                        </select>
+                        <p className="text-[10px] text-indigo-600/80 italic">Select a staff member to file this request for them.</p>
+                    </div>
+                )}
+
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Request Type</label>
                     <select className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={newRequestType} onChange={(e) => setNewRequestType(e.target.value as RequestType)}>
-                        {Object.values(RequestType).map(t => <option key={t} value={t}>{t}</option>)}
+                        {/* "Called Out" intentionally omitted from the selectable request types. */}
+                        {Object.values(RequestType).filter(t => t !== RequestType.CALLED_OUT).map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                 </div>
 

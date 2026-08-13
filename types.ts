@@ -17,7 +17,9 @@ export interface User {
   email: string;
   password?: string;
   avatar: string;
-  eligibleLocationIds: string[]; 
+  eligibleLocationIds: string[];
+  // When true, the user is forced to set a new password on their next sign-in.
+  mustResetPassword?: boolean;
 }
 
 export interface Location {

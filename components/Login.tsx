@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { User, Role } from '../types';
 import { Lock, ShieldCheck, ArrowLeft, Mail, Building2, Globe, AlertCircle } from 'lucide-react';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
 import { ref, get, set } from 'firebase/database';
 import { auth, database } from '../firebase';
 import { ALLOWED_DOMAINS, DEFAULT_USERS, DEFAULT_LOCATIONS } from '../App';
@@ -21,6 +21,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [tempUser, setTempUser] = useState<User | null>(null);
   const [verificationCode, setVerificationCode] = useState('');
   const [sentCode, setSentCode] = useState('');
+  const [resetNotice, setResetNotice] = useState('');
 
   const ROLES_REQUIRING_2FA = [Role.ADMIN, Role.GM, Role.BOM];
 
@@ -87,6 +88,36 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  const handleForgotPassword = async () => {
+    setError('');
+    setResetNotice('');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Enter your work email above, then select “Forgot password?”.');
+      return;
+    }
+    const domain = cleanEmail.split('@')[1];
+    if (!ALLOWED_DOMAINS.includes(domain)) {
+      setError(`Access Denied: ${'@' + domain} is not a recognized corporate domain.`);
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
+      // Firebase does not reveal whether an address exists — keep the message neutral.
+      setResetNotice(`If an account exists for ${cleanEmail}, a password reset link has been sent. Check your inbox (and spam folder).`);
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/invalid-email') {
+        setError('That email address is not valid.');
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many attempts. Please wait a moment and try again.');
+      } else {
+        // Treat "user-not-found" the same as success to avoid leaking which emails exist.
+        setResetNotice(`If an account exists for ${cleanEmail}, a password reset link has been sent. Check your inbox (and spam folder).`);
+      }
+    }
+  };
+
   const handleVerifySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (verificationCode === sentCode && tempUser) {
@@ -144,7 +175,16 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Password</label>
+                    <div className="flex items-center justify-between mb-1.5 ml-1">
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest">Password</label>
+                        <button
+                            type="button"
+                            onClick={handleForgotPassword}
+                            className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline uppercase tracking-wider"
+                        >
+                            Forgot password?
+                        </button>
+                    </div>
                     <div className="relative">
                         <Lock className="absolute left-3 top-3 text-slate-300" size={18} />
                         <input
@@ -157,6 +197,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         />
                     </div>
                 </div>
+
+                {resetNotice && (
+                    <div className="bg-green-50 text-green-700 text-[11px] p-3 rounded-xl border border-green-100 flex items-start gap-2 font-bold animate-in fade-in slide-in-from-top-2">
+                        <Mail className="shrink-0" size={14} />
+                        <span>{resetNotice}</span>
+                    </div>
+                )}
 
                 {error && (
                     <div className="bg-red-50 text-red-700 text-[11px] p-3 rounded-xl border border-red-100 flex items-start gap-2 font-bold animate-in fade-in slide-in-from-top-2">
