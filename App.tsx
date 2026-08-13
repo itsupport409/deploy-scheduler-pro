@@ -13,6 +13,7 @@ import StaffDirectory from './components/StaffDirectory';
 import Orientation from './components/Orientation';
 import AdminPanel from './components/AdminPanel';
 import Login from './components/Login';
+import ForcePasswordReset from './components/ForcePasswordReset';
 import { Role, User, Location, Shift, AppState, RequestStatus, ChangeRequest, RequestType, Notification, ScheduleTemplate } from './types';
 
 export const ALLOWED_DOMAINS = ['icecoldair.com'];
@@ -287,8 +288,32 @@ const App: React.FC = () => {
       role: user.role || Role.Technician,
       avatar: '',
       eligibleLocationIds: [],
+      // New staff must set their own password the first time they sign in.
+      mustResetPassword: true,
     };
     setState(prev => ({ ...prev, users: [...prev.users, newUser] }));
+  };
+
+  // Edit a staff member's core profile fields (name / email / role) from the directory
+  const handleEditUser = (userId: string, updates: { name: string; email: string; role: Role }) => {
+    const cleanEmail = updates.email.trim().toLowerCase();
+    setState(prev => ({
+      ...prev,
+      users: prev.users.map(u => u.id === userId ? { ...u, name: updates.name.trim(), email: cleanEmail, role: updates.role } : u),
+      currentUser: prev.currentUser.id === userId
+        ? { ...prev.currentUser, name: updates.name.trim(), email: cleanEmail, role: updates.role }
+        : prev.currentUser,
+    }));
+  };
+
+  // Clear the forced-reset flag once a new user has set their own password
+  const handleCompleteFirstLoginReset = () => {
+    setCurrentUser(prev => prev ? { ...prev, mustResetPassword: false } : prev);
+    setState(prev => ({
+      ...prev,
+      currentUser: { ...prev.currentUser, mustResetPassword: false },
+      users: prev.users.map(u => u.id === prev.currentUser.id ? { ...u, mustResetPassword: false } : u),
+    }));
   };
 
   const handleRemoveUser = (id: string) => {
@@ -347,7 +372,7 @@ const App: React.FC = () => {
       case 'dashboard': return <Dashboard users={state.users} shifts={state.shifts} requests={state.requests} notifications={state.notifications} currentUser={state.currentUser} />;
       case 'schedule': return <Scheduler shifts={state.shifts} users={state.users} locations={state.locations} templates={state.templates} requests={state.requests} onAddShifts={handleAddShifts} onUpdateShift={handleUpdateShift} onRemoveShift={handleRemoveShift} onSaveTemplate={handleSaveTemplate} onApplyTemplate={handleApplyTemplate} onRemoveTemplate={handleRemoveTemplate} onAddLocation={handleAddLocation} currentUser={state.currentUser} />;
       case 'requests': return <Requests requests={state.requests} users={state.users} currentUser={state.currentUser} onUpdateRequest={handleRequestUpdate} onRequestCreate={handleRequestCreate} onSendNotification={handleAddNotification} />;
-      case 'staff': return <StaffDirectory users={state.users} locations={state.locations} currentUser={state.currentUser} onUpdateUser={handleUpdateUser} />;
+      case 'staff': return <StaffDirectory users={state.users} locations={state.locations} currentUser={state.currentUser} onUpdateUser={handleUpdateUser} onEditUser={handleEditUser} />;
       case 'help': return <Orientation currentUser={state.currentUser} />;
       case 'admin': return <AdminPanel users={state.users} deletedUsers={state.deletedUsers || []} locations={state.locations} shifts={state.shifts} templates={state.templates} requests={state.requests} notifications={state.notifications} onAddUser={handleAddUser} onRemoveUser={handleRemoveUser} onRestoreUser={handleRestoreUser} onAddLocation={handleAddLocation} onRemoveLocation={handleRemoveLocation} onImportUsers={handleImportUsers} onResetPassword={handleUpdatePassword} onRestoreState={handleRestoreState} currentUser={state.currentUser} />;
       default: return <Dashboard users={state.users} shifts={state.shifts} requests={state.requests} notifications={state.notifications} currentUser={state.currentUser} />;
@@ -363,6 +388,11 @@ const App: React.FC = () => {
   }
 
   if (!isAuthenticated || !currentUser) return <Login onLogin={handleLogin} />;
+
+  // First-login gate: new users must set their own password before entering the app
+  if (currentUser.mustResetPassword) {
+    return <ForcePasswordReset currentUser={currentUser} onComplete={handleCompleteFirstLoginReset} onLogout={handleLogout} />;
+  }
 
   return (
     <HashRouter>

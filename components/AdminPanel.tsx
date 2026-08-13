@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { User, Location, Role, Shift, ChangeRequest, AppState, Notification, RequestType, ScheduleTemplate } from '../types';
-import { Plus, Trash2, MapPin, UserPlus, FileUp, Download, AlertCircle, CheckCircle, Key, X, Info, Database, Save, UploadCloud, ShieldAlert, Cpu, CheckSquare, Search, RotateCcw, Calendar, History, ArrowRight, Clock } from 'lucide-react';
+import { Plus, Trash2, MapPin, UserPlus, FileUp, Download, AlertCircle, CheckCircle, Key, X, Info, Database, Save, UploadCloud, ShieldAlert, Cpu, CheckSquare, Search, RotateCcw, Calendar, History, ArrowRight, Clock, Eye, EyeOff, Lock } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { ref, set } from 'firebase/database';
 import { auth, database } from '../firebase';
@@ -36,7 +36,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
   const [importStatus, setImportStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: Role.Technician, password: '' });
+  const [showPassword, setShowPassword] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  // Calendar (date-range) search for the 160-day request audit
+  const [auditFrom, setAuditFrom] = useState('');
+  const [auditTo, setAuditTo] = useState('');
 
   const historicalRequests = useMemo(() => {
     const cutoff = new Date();
@@ -46,6 +50,60 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
       .filter(r => new Date(r.targetDate) >= cutoff)
       .sort((a, b) => new Date(b.targetDate).getTime() - new Date(a.targetDate).getTime());
   }, [requests]);
+
+  // Apply the calendar date-range filter on top of the 160-day window
+  const auditResults = useMemo(() => {
+    return historicalRequests.filter(r => {
+      const d = new Date(r.targetDate);
+      d.setHours(0, 0, 0, 0);
+      if (auditFrom) {
+        const f = new Date(auditFrom);
+        f.setHours(0, 0, 0, 0);
+        if (d < f) return false;
+      }
+      if (auditTo) {
+        const t = new Date(auditTo);
+        t.setHours(23, 59, 59, 999);
+        if (d > t) return false;
+      }
+      return true;
+    });
+  }, [historicalRequests, auditFrom, auditTo]);
+
+  // Wrap a value for safe CSV output (quote/escape embedded quotes, commas, newlines)
+  const csvCell = (value: string | number) => {
+    const s = String(value ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const handleExportAuditCSV = () => {
+    const header = ['Date Logged', 'Staff Member', 'Role', 'Target Date', 'End Date', 'In Time', 'Out Time', 'Type', 'Pay', 'Status'];
+    const rows = auditResults.map(req => {
+      const requester = users.find(u => u.id === req.requesterId) || deletedUsers.find(u => u.id === req.requesterId);
+      return [
+        new Date(req.createdAt).toLocaleDateString(),
+        requester?.name || 'Unknown',
+        requester?.role || '',
+        new Date(req.targetDate).toLocaleDateString(),
+        req.endDate ? new Date(req.endDate).toLocaleDateString() : '',
+        req.inTime || '',
+        req.outTime || '',
+        req.type,
+        req.payType || 'N/A',
+        req.status,
+      ];
+    });
+    const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `request_audit_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,7 +212,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
               <form onSubmit={handleAddUser} className="space-y-4 mb-6">
                   <input type="text" placeholder="Full Name" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.name} onChange={(e) => setNewUser({...newUser, name: e.target.value})} />
                   <input type="email" placeholder="Staff Email" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.email} onChange={(e) => setNewUser({...newUser, email: e.target.value})} />
-                  <input type="password" required placeholder="Initial Password (min 6 chars, required)" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} />
+                  <div className="relative">
+                      <input type={showPassword ? 'text' : 'password'} required placeholder="Initial Password (min 6 chars, required)" className="w-full border rounded-lg px-3 py-2 pr-10 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} />
+                      <button type="button" onClick={() => setShowPassword(s => !s)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1" title={showPassword ? 'Hide password' : 'Show password'} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                  </div>
                   <select className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500" value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value as Role})}>{Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}</select>
                   {formError && <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded flex items-center gap-2"><AlertCircle size={14}/> {formError}</div>}
                   {importStatus && <div className={`p-2.5 border text-xs font-bold rounded flex items-center gap-2 ${importStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}><CheckCircle size={14}/> {importStatus.msg}</div>}
@@ -173,8 +236,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
               <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Search className="text-blue-500" size={20}/> Registry Audit</h3><span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-full">ACTIVE: {users.length}</span></div>
               <input type="text" placeholder="Filter active staff..." className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300 mb-4" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-              <div className="max-h-96 overflow-y-auto space-y-1 pr-1 custom-scrollbar">{filteredUsers.slice().reverse().map(u => (
-                      <div key={u.id} className="flex justify-between items-center p-3 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all"><div className="min-w-0"><span className="font-bold text-slate-800 block">{u.name}</span><span className="text-slate-400 text-[10px] block">{u.email} • {u.role}</span></div><button onClick={() => { if(confirm(`Archive ${u.name}?`)) onRemoveUser(u.id); }} className="text-red-400 p-2 hover:bg-red-50 rounded-full transition-colors ml-2"><Trash2 size={16}/></button></div>
+              <div className="max-h-96 overflow-y-scroll space-y-1 pr-2 custom-scrollbar border border-slate-100 rounded-lg">{filteredUsers.slice().reverse().map(u => (
+                      <div key={u.id} className="flex justify-between items-center p-3 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all"><div className="min-w-0"><span className="font-bold text-slate-800 block">{u.name}</span><span className="text-slate-400 text-[10px] block">{u.email} • {u.role}</span><span className="text-slate-300 text-[10px] flex items-center gap-1 mt-0.5" title="Password is hidden for security"><Lock size={9}/> ••••••••</span></div><button onClick={() => { if(confirm(`Archive ${u.name}?`)) onRemoveUser(u.id); }} className="text-red-400 p-2 hover:bg-red-50 rounded-full transition-colors ml-2"><Trash2 size={16}/></button></div>
                   ))}</div>
           </div>
 
@@ -209,16 +272,33 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex justify-between items-center mb-4">
                 <div><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><History className="text-indigo-500" size={20}/> 160-Day Request Audit</h3><p className="text-xs text-slate-500 mt-1">Absence and modification logs.</p></div>
-                <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full font-bold text-xs border border-indigo-100"><History size={14}/> {historicalRequests.length} HISTORICAL LOGS</div>
+                <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full font-bold text-xs border border-indigo-100"><History size={14}/> {auditResults.length} / {historicalRequests.length} LOGS</div>
               </div>
+
+              {/* Calendar date-range search + CSV export */}
+              <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-4 p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                <div className="flex-1">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Calendar size={11}/> From Date</label>
+                    <input type="date" value={auditFrom} onChange={(e) => setAuditFrom(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400 bg-white" />
+                </div>
+                <div className="flex-1">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Calendar size={11}/> To Date</label>
+                    <input type="date" value={auditTo} onChange={(e) => setAuditTo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400 bg-white" />
+                </div>
+                {(auditFrom || auditTo) && (
+                    <button type="button" onClick={() => { setAuditFrom(''); setAuditTo(''); }} className="flex items-center justify-center gap-1 px-3 py-2 text-slate-500 hover:bg-slate-200 rounded-lg text-xs font-bold transition-colors"><X size={14}/> Clear</button>
+                )}
+                <button type="button" onClick={handleExportAuditCSV} disabled={auditResults.length === 0} className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold shadow-sm transition-all active:scale-95"><Download size={16}/> Export CSV</button>
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                     <thead><tr className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-widest font-bold"><th className="px-4 py-3 rounded-l-lg">Date Logged</th><th className="px-4 py-3">Staff Member</th><th className="px-4 py-3">Target Date(s) & Time</th><th className="px-4 py-3">Type/Pay</th><th className="px-4 py-3 rounded-r-lg">Status</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                        {historicalRequests.length === 0 ? (<tr><td colSpan={5} className="text-center py-12 text-slate-400 italic">No historical requests found.</td></tr>) : (
-                            historicalRequests.map(req => {
+                        {auditResults.length === 0 ? (<tr><td colSpan={5} className="text-center py-12 text-slate-400 italic">{historicalRequests.length === 0 ? 'No historical requests found.' : 'No requests match the selected date range.'}</td></tr>) : (
+                            auditResults.map(req => {
                                 const requester = users.find(u => u.id === req.requesterId) || deletedUsers.find(u => u.id === req.requesterId);
                                 return (
                                     <tr key={req.id} className="hover:bg-slate-50/50 transition-colors">
