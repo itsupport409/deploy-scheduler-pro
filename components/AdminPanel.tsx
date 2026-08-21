@@ -22,6 +22,7 @@ interface AdminPanelProps {
   onImportUsers: (users: Partial<User>[]) => void;
   onResetPassword: (userId: string, newPassword: string) => void;
   onRestoreState: (state: AppState) => void;
+  onClearRequests: () => void;
   currentUser: User;
 }
 
@@ -29,7 +30,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     users, deletedUsers, locations, shifts, templates, requests,
     notifications,
     onAddUser, onRemoveUser, onRestoreUser, onAddLocation, onRemoveLocation,
-    onImportUsers, onResetPassword, onRestoreState, currentUser
+    onImportUsers, onResetPassword, onRestoreState, onClearRequests, currentUser
 }) => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocCalId, setNewLocCalId] = useState('');
@@ -103,6 +104,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  // Clearing the full request history is restricted to Administrators only
+  // (the Admin Panel itself is also visible to HR Business Office Managers).
+  const isAdmin = currentUser.role === Role.ADMIN;
+
+  const handleClearRequestHistory = () => {
+    if (requests.length === 0) return;
+    if (confirm(`Permanently clear ALL ${requests.length} request record(s)? This starts request history from a clean slate and cannot be undone. Users, shifts, locations and templates are not affected.`)) {
+      onClearRequests();
+    }
   };
 
   const handleAddUser = (e: React.FormEvent) => {
@@ -274,7 +286,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
               <div className="flex justify-between items-center mb-4">
                 <div><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><History className="text-indigo-500" size={20}/> 160-Day Request Audit</h3><p className="text-xs text-slate-500 mt-1">Absence and modification logs.</p></div>
-                <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full font-bold text-xs border border-indigo-100"><History size={14}/> {auditResults.length} / {historicalRequests.length} LOGS</div>
+                <div className="flex items-center gap-2">
+                    {isAdmin && (
+                        <button
+                            type="button"
+                            onClick={handleClearRequestHistory}
+                            disabled={requests.length === 0}
+                            title="Administrator only — permanently clears all request records"
+                            className="flex items-center gap-1.5 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                        >
+                            <Trash2 size={14}/> Clear Request History
+                        </button>
+                    )}
+                    <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full font-bold text-xs border border-indigo-100"><History size={14}/> {auditResults.length} / {historicalRequests.length} LOGS</div>
+                </div>
               </div>
 
               {/* Calendar date-range search + CSV export */}

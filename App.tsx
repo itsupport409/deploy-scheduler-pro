@@ -207,6 +207,12 @@ const App: React.FC = () => {
     }));
   };
 
+  // Administrators only — clears the entire request history (start with a clean slate).
+  const handleClearRequests = () => {
+    if (state.currentUser.role !== Role.ADMIN) return;
+    setState(prev => ({ ...prev, requests: [] }));
+  };
+
   const handleAddNotification = (notif: Partial<Notification>) => {
     const newNotif: Notification = {
       id: generateId(),
@@ -374,7 +380,7 @@ const App: React.FC = () => {
       case 'requests': return <Requests requests={state.requests} users={state.users} currentUser={state.currentUser} onUpdateRequest={handleRequestUpdate} onRequestCreate={handleRequestCreate} onSendNotification={handleAddNotification} />;
       case 'staff': return <StaffDirectory users={state.users} locations={state.locations} currentUser={state.currentUser} onUpdateUser={handleUpdateUser} onEditUser={handleEditUser} />;
       case 'help': return <Orientation currentUser={state.currentUser} />;
-      case 'admin': return <AdminPanel users={state.users} deletedUsers={state.deletedUsers || []} locations={state.locations} shifts={state.shifts} templates={state.templates} requests={state.requests} notifications={state.notifications} onAddUser={handleAddUser} onRemoveUser={handleRemoveUser} onRestoreUser={handleRestoreUser} onAddLocation={handleAddLocation} onRemoveLocation={handleRemoveLocation} onImportUsers={handleImportUsers} onResetPassword={handleUpdatePassword} onRestoreState={handleRestoreState} currentUser={state.currentUser} />;
+      case 'admin': return <AdminPanel users={state.users} deletedUsers={state.deletedUsers || []} locations={state.locations} shifts={state.shifts} templates={state.templates} requests={state.requests} notifications={state.notifications} onAddUser={handleAddUser} onRemoveUser={handleRemoveUser} onRestoreUser={handleRestoreUser} onAddLocation={handleAddLocation} onRemoveLocation={handleRemoveLocation} onImportUsers={handleImportUsers} onResetPassword={handleUpdatePassword} onRestoreState={handleRestoreState} onClearRequests={handleClearRequests} currentUser={state.currentUser} />;
       default: return <Dashboard users={state.users} shifts={state.shifts} requests={state.requests} notifications={state.notifications} currentUser={state.currentUser} />;
     }
   };
