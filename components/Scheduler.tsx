@@ -31,21 +31,32 @@ const Scheduler: React.FC<SchedulerProps> = ({
   onApplyTemplate,
   onRemoveTemplate,
   onAddLocation,
-  currentUser 
+  currentUser
 }) => {
-  const [selectedLocation, setSelectedLocation] = useState<string>(locations[0]?.id || '');
+  // Managers may schedule any location; regular staff are limited to their enabled ones.
+  const isManager = currentUser.role === Role.GM || currentUser.role === Role.BOM || currentUser.role === Role.ADMIN;
+
+  // The Schedule tab only surfaces locations the current user is enabled for (managers see all).
+  const visibleLocations = isManager
+    ? locations
+    : locations.filter(l => currentUser.eligibleLocationIds?.includes(l.id));
+
+  const [selectedLocation, setSelectedLocation] = useState<string>(visibleLocations[0]?.id || '');
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
   const [showAddLocationModal, setShowAddLocationModal] = useState(false);
   const [newLocName, setNewLocName] = useState('');
   const [newLocCalendarId, setNewLocCalendarId] = useState('');
   const [addLocError, setAddLocError] = useState<string | null>(null);
 
-  // Keep selectedLocation valid when locations change (e.g. load from API)
+  // Keep selectedLocation valid and within the user's enabled locations
   useEffect(() => {
-    const currentExists = locations.some(l => l.id === selectedLocation);
-    if (!currentExists && locations.length > 0) setSelectedLocation(locations[0].id);
-    if (locations.length > 0 && !selectedLocation) setSelectedLocation(locations[0].id);
-  }, [locations, selectedLocation]);
+    const eligible = isManager
+      ? locations
+      : locations.filter(l => currentUser.eligibleLocationIds?.includes(l.id));
+    const currentExists = eligible.some(l => l.id === selectedLocation);
+    if (!currentExists && eligible.length > 0) setSelectedLocation(eligible[0].id);
+    if (eligible.length === 0 && selectedLocation) setSelectedLocation('');
+  }, [locations, selectedLocation, currentUser, isManager]);
   
   // Week navigation state
   const [weekStart, setWeekStart] = useState(() => {
@@ -157,8 +168,6 @@ const Scheduler: React.FC<SchedulerProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-
-  const isManager = currentUser.role === Role.GM || currentUser.role === Role.BOM || currentUser.role === Role.ADMIN;
 
   const getShiftsForCell = (userId: string, date: Date) => {
     return shifts.filter(s => {
@@ -334,6 +343,9 @@ const Scheduler: React.FC<SchedulerProps> = ({
 
   const filteredTemplates = templates.filter(t => t.locationId === selectedLocation);
 
+  // Only staff assigned to the selected location appear as rows on the calendar.
+  const locationUsers = users.filter(u => u.eligibleLocationIds?.includes(selectedLocation));
+
   return (
     <div className="p-6 space-y-6">
       <ShiftConfigModal />
@@ -367,7 +379,11 @@ const Scheduler: React.FC<SchedulerProps> = ({
                 <div className="flex items-center px-3 py-2 border-r border-slate-200">
                     <MapPin size={16} className="text-slate-400 mr-2" />
                     <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)} className="bg-transparent outline-none text-sm font-medium text-slate-700 min-w-[180px]">
-                        {locations.map(loc => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
+                        {visibleLocations.length === 0 ? (
+                            <option value="" disabled>No locations assigned</option>
+                        ) : (
+                            visibleLocations.map(loc => (<option key={loc.id} value={loc.id}>{loc.name}</option>))
+                        )}
                     </select>
                 </div>
                 <button type="button" onClick={() => { setShowAddLocationModal(true); setAddLocError(null); setNewLocName(''); setNewLocCalendarId(''); }} className="p-2 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded-r-lg transition-colors" title="Add location">
@@ -455,7 +471,10 @@ const Scheduler: React.FC<SchedulerProps> = ({
             </div>
 
             <div className="divide-y divide-slate-200 print:divide-slate-400">
-                {users.map(user => {
+                {locationUsers.length === 0 && (
+                    <div className="p-8 text-center text-sm text-slate-400 italic print:hidden">No staff are assigned to this location.</div>
+                )}
+                {locationUsers.map(user => {
                     const weeklyHours = getUserWeeklyHours(user.id);
                     return (
                         <div key={user.id} className="grid grid-cols-9 divide-x divide-slate-200 group hover:bg-slate-50 transition-colors print:divide-slate-400">
