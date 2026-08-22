@@ -36,6 +36,9 @@ const Scheduler: React.FC<SchedulerProps> = ({
   // Managers may schedule any location; regular staff are limited to their enabled ones.
   const isManager = currentUser.role === Role.GM || currentUser.role === Role.BOM || currentUser.role === Role.ADMIN;
 
+  // Adding/editing the schedule (shifts and templates) is limited to Administrators and General Managers.
+  const canManageSchedule = currentUser.role === Role.ADMIN || currentUser.role === Role.GM;
+
   // The Schedule tab only surfaces locations the current user is enabled for (managers see all).
   const visibleLocations = isManager
     ? locations
@@ -209,7 +212,7 @@ const Scheduler: React.FC<SchedulerProps> = ({
   };
 
   const handleOpenConfig = (userId: string, date: Date, shift?: Shift) => {
-    if (!isManager) return;
+    if (!canManageSchedule) return;
     setConfigModal({ open: true, userId, date, shift });
   };
 
@@ -430,6 +433,7 @@ const Scheduler: React.FC<SchedulerProps> = ({
 
             {isManager && (
                 <div className="flex items-center gap-2">
+                    {canManageSchedule && (
                     <div className="relative">
                         <button onClick={() => setShowTemplateMenu(!showTemplateMenu)} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-200"><LayoutGrid size={16} /> Templates <ChevronDown size={14} /></button>
                         {showTemplateMenu && (
@@ -448,6 +452,7 @@ const Scheduler: React.FC<SchedulerProps> = ({
                             </div>
                         )}
                     </div>
+                    )}
                     <div className="flex items-center gap-1 border-l pl-3 border-slate-300 ml-1">
                         <button onClick={handleExportScheduleCSV} className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-indigo-600 rounded-lg transition-colors text-sm font-bold" title="Export this week's schedule to CSV"><Download size={18} /> Export CSV</button>
                     </div>
@@ -528,7 +533,7 @@ const Scheduler: React.FC<SchedulerProps> = ({
                                                 </div>
                                             ))
                                         ) : (
-                                            isManager && (
+                                            canManageSchedule && (
                                                 <button onClick={() => handleOpenConfig(user.id, day)} className="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-slate-100 rounded-lg transition-all print:hidden"><Plus size={16} className="text-slate-400" /></button>
                                             )
                                         )}
